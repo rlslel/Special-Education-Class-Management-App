@@ -1,0 +1,1426 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { 
+  Camera, Save, X, User, Plus, Lock, Calendar, GraduationCap, Image, Settings, Home, 
+  Award, Trash2, Heart, Key, MessageCircle, Send, BookOpen, Check, Users, Briefcase, 
+  Badge, Wand2, CheckSquare, ListTodo, AlertCircle, HelpCircle, RefreshCcw, 
+  ChevronDown, ChevronUp, Edit2, Download, Upload, Database, Clock, Briefcase as Case,
+  AlertTriangle, Ban, RotateCcw, Link as LinkIcon, Book, Coins // [수정] 예산 아이콘(Coins) 추가
+} from 'lucide-react';
+
+// =================================================================================
+// [1] 전역 상수 및 설정 (Constants)
+// =================================================================================
+
+// [수정] 도덕, 특색활동 추가
+const TARGET_SUBJECTS = ['📕 국어', '📐 수학', '🌏 사회', '⚗️ 과학', '⚖️ 도덕', '🅰️ 영어', '🏃 체육', '🎵 음악', '🎨 미술', '💻 실과', '🍳 실과(요리)', '✨ 특색활동'];
+const DEFAULT_AVATARS = Array.from({ length: 6 }, (_, i) => `/default-avatars/avatar${i + 1}.png`);
+const SECURITY_QUESTIONS = ['선생님의 보물 1호는?', '기억에 남는 추억의 장소는?', '가장 좋아하는 음식은?', '직접 입력'];
+const STORAGE_KEYS = ['app_password', 'app_security', 'students_data', 'staff_data', 'integrated_schedule', 'class_photos', 'teacher_todos', 'service_records'];
+
+// =================================================================================
+// [2] 공통 UI 컴포넌트 (UI System)
+// =================================================================================
+
+const UI = {
+  Btn: ({ children, onClick, className = "", variant = "primary", ...props }) => {
+    const base = "py-3 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2";
+    const variants = {
+      primary: "bg-pink-400 hover:bg-pink-500 text-white shadow-md",
+      secondary: "bg-gray-100 hover:bg-gray-200 text-gray-600",
+      blue: "bg-blue-500 hover:bg-blue-600 text-white shadow-md",
+      danger: "bg-red-50 hover:bg-red-100 text-red-500",
+      ghost: "bg-transparent hover:bg-gray-50 text-gray-500"
+    };
+    return <button onClick={onClick} className={`${base} ${variants[variant]} ${className}`} {...props}>{children}</button>;
+  },
+
+  Input: ({ label, className = "", ...props }) => (
+    <div className="w-full">
+      {label && <label className="block text-xs font-bold text-gray-400 mb-1 ml-1">{label}</label>}
+      <input className={`w-full p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-pink-200 ${className}`} {...props} />
+    </div>
+  ),
+
+  Select: ({ label, options, ...props }) => (
+    <div className="w-full">
+      {label && <label className="block text-xs font-bold text-gray-400 mb-1 ml-1">{label}</label>}
+      <select className="w-full p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-pink-200" {...props}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  ),
+
+  Modal: ({ children, onClose, title, maxWidth = "max-w-2xl" }) => {
+    useEffect(() => {
+      const handleEsc = (e) => e.key === 'Escape' && onClose();
+      window.addEventListener('keydown', handleEsc);
+      return () => window.removeEventListener('keydown', handleEsc);
+    }, [onClose]);
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in-up" onClick={onClose}>
+        <div className={`bg-white rounded-[2rem] shadow-2xl w-full ${maxWidth} overflow-hidden max-h-[90vh] flex flex-col`} onClick={e => e.stopPropagation()}>
+          {title && (
+            <div className="p-4 border-b flex justify-between items-center bg-white sticky top-0 z-10">
+              <h3 className="text-xl font-bold ml-2">{title}</h3>
+              <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
+            </div>
+          )}
+          {children}
+        </div>
+      </div>
+    );
+  },
+
+  Card: ({ icon, title, value, color }) => {
+    const colors = { pink: 'bg-pink-100 text-pink-600', blue: 'bg-sky-100 text-sky-600', purple: 'bg-purple-100 text-purple-600' };
+    return (
+      <div className="bg-white p-6 rounded-[2rem] shadow-lg flex items-center gap-6 hover:-translate-y-1 transition-transform cursor-pointer border border-gray-50">
+        <div className={`w-20 h-20 rounded-2xl flex items-center justify-center text-4xl ${colors[color]}`}>{icon}</div>
+        <div><h3 className="text-gray-400 font-bold text-sm mb-1">{title}</h3><p className="text-3xl font-extrabold text-gray-800">{value}</p></div>
+      </div>
+    );
+  }
+};
+
+// 확인 모달 (재사용 컴포넌트)
+const ConfirmModal = ({ isOpen, message, onConfirm, onCancel }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl p-6 w-80 text-center animate-bounce-short">
+        <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
+          <AlertTriangle size={24} />
+        </div>
+        <h3 className="text-lg font-bold text-gray-800 mb-2">확인해주세요</h3>
+        <p className="text-gray-600 text-sm mb-6">{message}</p>
+        <div className="flex gap-2">
+          <UI.Btn variant="secondary" className="flex-1" onClick={onCancel}>취소</UI.Btn>
+          <UI.Btn variant="danger" className="flex-1" onClick={onConfirm}>확인</UI.Btn>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// 커스텀 훅: 로컬 스토리지 데이터 지속성 관리
+function usePersistentState(key, initialValue) {
+  const [state, setState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : initialValue;
+    } catch { return initialValue; }
+  });
+  useEffect(() => localStorage.setItem(key, JSON.stringify(state)), [key, state]);
+  return [state, setState];
+}
+
+
+
+// =================================================================================
+// [3] 메인 앱 진입점 (App & Auth)
+// =================================================================================
+
+export default function App() {
+  const [auth, setAuth] = useState({ authenticated: false, setupMode: false });
+  const [pwInput, setPwInput] = useState('');
+  const [storedPw, setStoredPw] = usePersistentState('app_password', null);
+  const [security, setSecurity] = usePersistentState('app_security', null);
+  const [modal, setModal] = useState({ type: null, msg: '' }); 
+  const [setup, setSetup] = useState({ pw: '', q: SECURITY_QUESTIONS[0], a: '', customQ: '' });
+
+  // 초기 실행 시 비밀번호 설정 여부 확인
+  useEffect(() => { if (!storedPw) setAuth(p => ({ ...p, setupMode: true })); }, [storedPw]);
+
+  const handleAuth = () => {
+    if (auth.setupMode) {
+      if (setup.pw.length < 4) return setModal({ type: 'error', msg: '비밀번호는 4자리 이상이어야 합니다.' });
+      if (!setup.a.trim()) return setModal({ type: 'error', msg: '답변을 입력해주세요.' });
+      setStoredPw(setup.pw);
+      setSecurity({ question: setup.q === '직접 입력' ? setup.customQ : setup.q, answer: setup.a });
+      setAuth({ setupMode: false, authenticated: true });
+    } else {
+      if (pwInput === storedPw) setAuth({ ...auth, authenticated: true });
+      else { setModal({ type: 'error', msg: '비밀번호가 일치하지 않습니다.' }); setPwInput(''); }
+    }
+  };
+
+  const handleRecovery = (newPw) => {
+    setStoredPw(newPw);
+    setModal({ type: 'error', msg: '비밀번호가 재설정되었습니다. 로그인해주세요.' }); 
+  };
+
+  if (!auth.authenticated) return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100 font-sans p-4">
+      <div className="bg-white p-8 rounded-[2rem] shadow-xl w-full max-w-md border-4 border-white text-center relative animate-fade-in-up">
+        <div className="flex justify-center mb-6"><div className="w-24 h-24 bg-yellow-200 rounded-full flex items-center justify-center text-4xl shadow-inner animate-bounce-slow">🌟</div></div>
+        <h1 className="text-2xl font-extrabold text-gray-700 mb-2">{auth.setupMode ? '환영합니다!' : '선생님, 안녕하세요!'}</h1>
+        
+        {auth.setupMode ? (
+          <div className="space-y-4 text-left">
+            <UI.Input label="비밀번호 설정" type="password" value={setup.pw} onChange={e => setSetup({...setup, pw: e.target.value})} placeholder="4자리 이상" />
+            <div>
+              <UI.Select label="본인 확인 질문" options={SECURITY_QUESTIONS.map(q => ({ value: q, label: q }))} value={setup.q} onChange={e => setSetup({...setup, q: e.target.value})} />
+              {setup.q === '직접 입력' && <UI.Input className="mt-2" value={setup.customQ} onChange={e => setSetup({...setup, customQ: e.target.value})} placeholder="질문 입력" />}
+              <UI.Input className="mt-2" value={setup.a} onChange={e => setSetup({...setup, a: e.target.value})} placeholder="정답 입력" />
+            </div>
+            <UI.Btn className="w-full mt-2" onClick={handleAuth}>시작하기</UI.Btn>
+          </div>
+        ) : (
+          <>
+            <div className="relative mb-4">
+              <UI.Input type="password" value={pwInput} onChange={e => setPwInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAuth()} placeholder="••••" className="text-center text-xl tracking-[0.5em]" />
+              <Lock size={20} className="absolute top-9 right-4 text-gray-300"/>
+            </div>
+            <UI.Btn className="w-full" onClick={handleAuth}>로그인</UI.Btn>
+            <button onClick={() => setModal({ type: 'recovery' })} className="mt-4 text-xs text-gray-400 underline">비밀번호를 잊으셨나요?</button>
+          </>
+        )}
+      </div>
+
+      {modal.type === 'error' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in" onClick={() => setModal({ type: null })}>
+          <div className="bg-white p-6 rounded-3xl shadow-2xl w-80 text-center animate-bounce-short border-4 border-pink-100">
+            <AlertCircle size={48} className="text-red-400 mx-auto mb-4" />
+            <h3 className="text-lg font-extrabold text-gray-700 mb-2">알림</h3>
+            <p className="text-gray-500 text-sm mb-6">{modal.msg}</p>
+            <UI.Btn className="w-full bg-gray-800" onClick={() => setModal({ type: null })}>확인</UI.Btn>
+          </div>
+        </div>
+      )}
+      {modal.type === 'recovery' && <RecoveryModal securityData={security} onClose={() => setModal({ type: null })} onSuccess={handleRecovery} onError={msg => setModal({ type: 'error', msg })} />}
+    </div>
+  );
+
+  return <MainLayout storedPw={storedPw} setStoredPw={setStoredPw} security={security} setSecurity={setSecurity} showGlobalError={msg => setModal({ type: 'error', msg })} />;
+}
+
+// =================================================================================
+// [4] 메인 레이아웃 및 네비게이션
+// =================================================================================
+
+function MainLayout({ storedPw, setStoredPw, security, setSecurity, showGlobalError }) {
+  const [menu, setMenu] = useState('dashboard');
+  const [students, setStudents] = usePersistentState('students_data', []);
+  const [staff, setStaff] = usePersistentState('staff_data', []);
+  const [secCheck, setSecCheck] = useState({ open: false, target: null, input: '' });
+
+  // [수정] 메뉴 명칭 변경 및 예산 탭 추가
+  const MENU_ITEMS = [
+    { id: 'dashboard', label: '대시보드', icon: Home },
+    { id: 'students', label: '학생관리', icon: User, protected: true },
+    { id: 'personnel', label: '지원인력', icon: Users, protected: true }, // [수정] 지원인력으로 변경
+    { id: 'budget', label: '예산', icon: Coins, protected: true }, // [추가] 예산 탭
+    { id: 'schedule', label: '시간표', icon: Calendar },
+    { id: 'education', label: '개별화교육', icon: GraduationCap, protected: true }, // [수정] 개별화교육으로 변경
+    { id: 'photos', label: '활동사진', icon: Image },
+    { id: 'settings', label: '설정', icon: Settings, protected: true },
+  ];
+
+  const navigate = (id, isProtected) => {
+    if (menu === id) return;
+    if (isProtected) setSecCheck({ open: true, target: id, input: '' });
+    else setMenu(id);
+  };
+
+  const verify = (e) => {
+    e.preventDefault();
+    if (secCheck.input === storedPw) {
+      setMenu(secCheck.target);
+      setSecCheck({ ...secCheck, open: false });
+    } else showGlobalError('비밀번호가 일치하지 않습니다.');
+  };
+
+  const renderContent = () => {
+    const commonProps = { 
+      students: Array.isArray(students) ? students : [], 
+      setStudents, 
+      staff: Array.isArray(staff) ? staff : [], 
+      setStaff,
+      showGlobalError 
+    };
+    switch (menu) {
+      case 'dashboard': return <Dashboard {...commonProps} />;
+      case 'students': return <StudentManager {...commonProps} />;
+      case 'personnel': return <PersonnelManager {...commonProps} />;
+      case 'budget': return <BudgetManager />; // [추가] 예산 컴포넌트 연결
+      case 'schedule': return <ScheduleManager {...commonProps} />;
+      case 'education': return <EducationManager {...commonProps} />;
+      case 'photos': return <PhotoManager />;
+      case 'settings': return <SettingsPage storedPw={storedPw} setStoredPw={setStoredPw} security={security} setSecurity={setSecurity} showGlobalError={showGlobalError} />;
+      default: return <Dashboard {...commonProps} />;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex font-sans text-gray-700">
+      {/* 사이드바 */}
+      <aside className="w-20 bg-white/80 backdrop-blur-md border-r border-white shadow-xl flex flex-col z-10 items-center py-6 shrink-0">
+        <div className="mb-8 w-12 h-12 bg-yellow-300 rounded-full flex items-center justify-center text-2xl shadow-lg cursor-default">🚀</div>
+        <nav className="flex-1 w-full space-y-4 px-2">
+          {MENU_ITEMS.map(({ id, label, icon: Icon, protected: isProtected }) => (
+            <button key={id} onClick={() => navigate(id, isProtected)} className={`w-full flex flex-col items-center py-3 rounded-2xl transition-all group relative ${menu === id ? 'bg-gradient-to-br from-pink-400 to-rose-400 text-white shadow-lg' : 'text-gray-400 hover:bg-white hover:shadow-md'}`}>
+              <Icon size={24} className={menu === id ? 'text-white' : 'group-hover:text-pink-400'} />
+              <span className={`text-[10px] mt-1 font-bold ${menu === id ? 'text-white' : 'text-gray-400 group-hover:text-pink-400'}`}>{label}</span>
+              {isProtected && menu !== id && <Lock size={10} className="absolute top-1 right-2 text-gray-300" />}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* 메인 컨텐츠 영역 */}
+      <main className="flex-1 overflow-y-auto relative">{renderContent()}</main>
+
+      {/* 메뉴 이동 시 보안 잠금 모달 */}
+      {secCheck.open && (
+        <UI.Modal onClose={() => setSecCheck({ ...secCheck, open: false })} maxWidth="max-w-sm">
+          <div className="p-6 text-center">
+            <Lock size={40} className="mx-auto text-gray-300 mb-4"/>
+            <h3 className="text-xl font-bold mb-4">보안 접근 확인</h3>
+            <form onSubmit={verify}>
+              <UI.Input type="password" autoFocus value={secCheck.input} onChange={e => setSecCheck({...secCheck, input: e.target.value})} className="mb-4 text-center text-lg tracking-widest" placeholder="••••" />
+              <div className="flex gap-2">
+                <UI.Btn type="button" variant="secondary" className="flex-1" onClick={() => setSecCheck({ ...secCheck, open: false })}>취소</UI.Btn>
+                <UI.Btn type="submit" className="flex-1">확인</UI.Btn>
+              </div>
+            </form>
+          </div>
+        </UI.Modal>
+      )}
+    </div>
+  );
+}
+
+// =================================================================================
+// [5] 대시보드 컴포넌트
+// =================================================================================
+
+function Dashboard({ students, staff }) {
+  const [todoOpen, setTodoOpen] = useState(false);
+   
+  const getAssignedStaffName = (studentId) => {
+    const assigned = staff.filter(s => s.assignedStudentIds?.includes(studentId));
+    if (assigned.length === 0) return null;
+    return assigned.map(s => s.name).join(', ');
+  };
+
+  return (
+    <div className="p-8">
+      <div className="max-w-6xl mx-auto">
+        <h2 className="text-3xl font-extrabold text-gray-800 mb-10">오늘의 학급 현황</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          <UI.Card icon={<Users/>} title="등록 학생" value={`${students.length}명`} color="pink" />
+          <div onClick={() => setTodoOpen(true)}><UI.Card icon={<Calendar/>} title="오늘의 일정" value="오늘의 일정" color="blue" /></div>
+          <UI.Card icon={<Image/>} title="새 활동 사진" value="앨범보기" color="purple" />
+        </div>
+        <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-white">
+          <h3 className="text-xl font-bold text-gray-800 mb-6">우리 반 아이들</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {students.length > 0 ? students.map(s => {
+              const staffName = getAssignedStaffName(s.id);
+              return (
+                <div key={s.id} className="flex items-center gap-4 p-4 rounded-2xl bg-gray-50 border border-gray-100 hover:shadow-md transition-all">
+                   <img src={s.photo} className="w-14 h-14 rounded-full object-cover border bg-white flex-shrink-0" alt=""/>
+                   <div className="flex-1 min-w-0">
+                      <p className="font-bold text-gray-800 text-lg truncate">{s.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{s.grade}학년 {s.classNumber}반 {s.teacher}쌤</p>
+                      {staffName && (
+                        <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full w-fit">
+                          <Briefcase size={10} /> 담당: {staffName}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1 mt-1.5">{s.targetSubjects?.map(sub => <span key={sub} className="text-[9px] bg-gray-100 px-1.5 py-0.5 rounded-md border">{sub}</span>) || <span className="text-[9px] text-gray-300">미정</span>}</div>
+                   </div>
+                </div>
+              );
+            }) : <div className="col-span-full text-center py-10 text-gray-400">학생이 없습니다.</div>}
+          </div>
+        </div>
+      </div>
+      {todoOpen && <TodoListModal onClose={() => setTodoOpen(false)} />}
+    </div>
+  );
+}
+
+// =================================================================================
+// [6] 학생 관리 컴포넌트
+// =================================================================================
+
+function StudentManager({ students, setStudents }) {
+  const [modal, setModal] = useState(null); 
+  const [confirmModal, setConfirmModal] = useState({ open: false, id: null });
+   
+  const save = (data) => {
+    if (modal.type === 'add') setStudents([...students, { ...data, id: Date.now(), photo: DEFAULT_AVATARS[students.length % 6] }]);
+    else setStudents(students.map(s => s.id === data.id ? data : s));
+    setModal({ type: 'success' });
+  };
+   
+  const confirmDelete = () => {
+    if (confirmModal.id) {
+      setStudents(students.filter(s => s.id !== confirmModal.id));
+      setModal(null);
+      setConfirmModal({ open: false, id: null });
+    }
+  };
+
+  return (
+    <div className="p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-8"><h2 className="text-3xl font-extrabold text-gray-800">학생 관리</h2><UI.Btn onClick={() => setModal({ type: 'add' })} className="bg-gray-800 px-6 rounded-full"><Plus size={20}/> 학생 등록</UI.Btn></div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          {students.map(s => (
+            <div key={s.id} onClick={() => setModal({ type: 'edit', data: s })} className={`cursor-pointer rounded-3xl border-4 ${s.gender==='여'?'border-pink-200 bg-pink-50':'border-blue-200 bg-blue-50'} bg-white shadow-lg hover:-translate-y-2 transition-all overflow-hidden`}>
+              <div className="p-6 flex flex-col items-center">
+                <div className="w-32 h-32 rounded-full border-4 border-white shadow-md overflow-hidden bg-gray-100 mb-4 flex items-center justify-center"><img src={s.photo} className="w-full h-full object-cover" alt=""/></div>
+                <div className={`px-4 py-1 rounded-full mb-4 ${s.gender==='여'?'bg-pink-100':'bg-blue-100'}`}><h2 className="text-xl font-bold text-gray-800">{s.name}</h2></div>
+                <div className="w-full text-sm text-gray-500 space-y-1"><div className="flex justify-between"><span>학년/반</span><b>{s.grade}학년 {s.classNumber}반</b></div><div className="flex justify-between"><span>담임</span><b>{s.teacher}쌤</b></div></div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {modal && modal.type !== 'success' && <StudentModal student={modal.data} onClose={() => setModal(null)} onSave={save} onDelete={(id) => setConfirmModal({ open: true, id })} isEdit={modal.type === 'edit'} />}
+        {modal && modal.type === 'success' && <UI.Modal onClose={() => setModal(null)} maxWidth="max-w-sm"><div className="p-8 text-center"><div className="w-16 h-16 bg-green-100 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4"><Check strokeWidth={4}/></div><h3 className="text-xl font-bold mb-6">저장 완료!</h3><UI.Btn className="w-full bg-green-500" onClick={() => setModal(null)}>확인</UI.Btn></div></UI.Modal>}
+        
+        <ConfirmModal isOpen={confirmModal.open} message="정말 이 학생 정보를 삭제하시겠습니까?" onConfirm={confirmDelete} onCancel={() => setConfirmModal({ open: false, id: null })} />
+      </div>
+    </div>
+  );
+}
+
+function StudentModal({ student, onClose, onSave, onDelete, isEdit }) {
+  const [form, setForm] = useState(student || { name: '', grade: '1', classNumber: '', gender: '남', teacher: '', extension: '', targetSubjects: [] });
+  const fileRef = useRef();
+  const handlePhoto = (e) => { const f = e.target.files[0]; if(f) { const r = new FileReader(); r.onloadend = () => setForm(p => ({...p, photo: r.result})); r.readAsDataURL(f); }};
+  const toggleSub = (s) => setForm(p => ({...p, targetSubjects: p.targetSubjects.includes(s) ? p.targetSubjects.filter(i => i !== s) : [...p.targetSubjects, s]}));
+
+  return (
+    <UI.Modal onClose={onClose} maxWidth="max-w-2xl">
+      <div className={`p-6 relative flex flex-col items-center ${form.gender === '여' ? 'bg-pink-100' : 'bg-blue-100'}`}>
+        <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/50 rounded-full"><X size={20}/></button>
+        {isEdit && <button onClick={() => onDelete(form.id)} className="absolute top-4 left-4 p-2 bg-white/50 rounded-full text-red-500 hover:bg-white"><Trash2 size={20}/></button>}
+        <div className="relative group w-32 h-32 rounded-full border-4 border-white shadow-lg overflow-hidden bg-white mb-4">
+          <img src={form.photo} className="w-full h-full object-cover" alt=""/>
+          <div onClick={() => fileRef.current.click()} className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Camera className="text-white"/></div>
+          <input type="file" ref={fileRef} onChange={handlePhoto} className="hidden" accept="image/*"/>
+        </div>
+        <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="text-3xl font-extrabold bg-transparent text-center outline-none border-b-2 border-transparent focus:border-gray-800 w-40" placeholder="이름" />
+      </div>
+      <div className="p-8 h-[50vh] overflow-y-auto custom-scrollbar space-y-6">
+        <div className="grid grid-cols-2 gap-6">
+          <div className="space-y-3">
+            <div className="flex gap-2">{['남','여'].map(g => <button key={g} onClick={() => setForm({...form, gender: g})} className={`flex-1 py-2 rounded-lg font-bold border-2 ${form.gender===g ? (g==='남'?'border-blue-400 bg-blue-50':'border-pink-400 bg-pink-50') : 'border-gray-100'}`}>{g}</button>)}</div>
+            <div className="flex gap-2">
+                <UI.Select label="학년" value={form.grade} onChange={e => setForm({...form, grade: e.target.value})} options={[1,2,3,4,5,6].map(g => ({value: g, label: `${g}학년`}))} />
+                <UI.Input label="반" value={form.classNumber} onChange={e => setForm({...form, classNumber: e.target.value})} />
+            </div>
+            <UI.Input label="담임 선생님" value={form.teacher} onChange={e => setForm({...form, teacher: e.target.value})} />
+            <UI.Input label="내선 번호" value={form.extension} onChange={e => setForm({...form, extension: e.target.value})} />
+          </div>
+          <div className="space-y-3">
+            <UI.Input label="생년월일" type="date" value={form.birthDate} onChange={e => setForm({...form, birthDate: e.target.value})} />
+            
+            {/* [수정] 장애 영역 옵션 추가 */}
+            <UI.Select label="장애 영역" value={form.disabilityType} onChange={e => setForm({...form, disabilityType: e.target.value})} 
+                options={['지적장애', '자폐성장애', '시각장애', '청각장애', '지체장애', '발달지체', '정서행동장애', '기타'].map(v => ({value: v, label: v}))} 
+            />
+            
+            <div className="flex justify-between p-2 border rounded-lg"><span className="text-sm font-bold">장애 등록</span><input type="checkbox" checked={form.isRegisteredDisabled} onChange={e => setForm({...form, isRegisteredDisabled: e.target.checked})} className="w-5 h-5 accent-pink-500"/></div>
+          </div>
+        </div>
+        <div>
+          <h3 className="font-bold text-gray-400 border-b pb-2 mb-2 flex items-center gap-2"><BookOpen size={16}/> 대상 과목</h3>
+          <div className="flex flex-wrap gap-2">{TARGET_SUBJECTS.map(s => <button key={s} onClick={() => toggleSub(s)} className={`px-3 py-1 rounded-full text-sm font-bold transition-all ${form.targetSubjects.includes(s) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{s}</button>)}</div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+            <textarea value={form.dreamCardUsage} onChange={e => setForm({...form, dreamCardUsage: e.target.value})} className="p-3 bg-yellow-50 border-yellow-100 border rounded-xl h-20 text-sm resize-none" placeholder="꿈꾸미 카드 메모" />
+            <textarea value={form.jaramiCardUsage} onChange={e => setForm({...form, jaramiCardUsage: e.target.value})} className="p-3 bg-green-50 border-green-100 border rounded-xl h-20 text-sm resize-none" placeholder="자라미 카드 메모" />
+        </div>
+      </div>
+      <div className="p-4 border-t flex justify-end"><UI.Btn onClick={() => onSave(form)} className="px-8 bg-gray-800">저장하기</UI.Btn></div>
+    </UI.Modal>
+  );
+}
+
+// =================================================================================
+// [7] 인력 관리 컴포넌트
+// =================================================================================
+
+function PersonnelManager({ students, staff, setStaff }) {
+  const [serviceRecords, setServiceRecords] = usePersistentState('service_records', []); 
+  const [modal, setModal] = useState(null); // { type, mode: 'add'|'edit', data }
+  const [serviceModal, setServiceModal] = useState(null); 
+  const [confirmModal, setConfirmModal] = useState({ open: false, id: null });
+
+  const saveStaff = (staffData) => {
+      if (modal.mode === 'add') {
+          setStaff([...staff, {
+              ...staffData, 
+              id: Date.now(), 
+              role: modal.type === 'practical' ? '실무사' : '사회복무요원',
+              type: modal.type,
+              date: new Date().toLocaleDateString()
+          }]);
+      } else {
+          setStaff(staff.map(s => s.id === staffData.id ? { ...s, ...staffData } : s));
+      }
+      setModal(null);
+  };
+   
+  const addService = (e) => {
+    e.preventDefault();
+    const newRecord = {
+      id: Date.now(),
+      staffId: serviceModal.staffId,
+      type: e.target.type.value,
+      date: e.target.date.value,
+      desc: e.target.desc.value
+    };
+    setServiceRecords([...serviceRecords, newRecord]);
+    setServiceModal(null);
+  };
+   
+  const confirmDelete = () => {
+      if(confirmModal.id) {
+          setStaff(staff.filter(x=>x.id!==confirmModal.id));
+          setConfirmModal({open: false, id: null});
+      }
+  };
+
+  const getAssignedStudentNames = (assignedIds) => {
+      if (!assignedIds || assignedIds.length === 0) return null;
+      return assignedIds
+          .map(id => students.find(s => s.id === id)?.name)
+          .filter(Boolean)
+          .join(', ');
+  };
+
+  const StaffList = ({ type, title, color }) => (
+    <div className="flex-1 flex flex-col">
+      <div className={`p-4 rounded-t-2xl border-b-2 flex justify-between items-center ${type==='practical'?'bg-blue-100 border-blue-200 text-blue-800':'bg-green-100 border-green-200 text-green-800'}`}>
+        <h3 className="font-extrabold flex gap-2"><Users size={20}/> {title}</h3><button onClick={()=>setModal({ type, mode: 'add', data: {} })} className="bg-white/50 p-2 rounded-full hover:bg-white"><Plus size={18}/></button>
+      </div>
+      <div className="bg-white p-4 rounded-b-2xl shadow-lg border-t-0 space-y-3 min-h-[200px]">
+        {staff.filter(s=>s.type===type).map(s => (
+          <div key={s.id} onClick={() => setModal({ type, mode: 'edit', data: s })} className={`cursor-pointer p-3 rounded-xl border flex justify-between items-center transition-transform hover:-translate-y-1 ${type==='practical'?'bg-blue-50 border-blue-200 hover:bg-blue-100':'bg-green-50 border-green-200 hover:bg-green-100'}`}>
+            <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-sm">{type==='practical'?'👩‍🏫':'🧑‍✈️'}</div>
+                <div>
+                    <div className="font-bold">{s.name}</div>
+                    {s.assignedStudentIds?.length > 0 && (
+                        <div className="text-[10px] text-gray-500 flex items-center gap-1 mt-1">
+                            <LinkIcon size={10}/> 담당: {getAssignedStudentNames(s.assignedStudentIds)}
+                        </div>
+                    )}
+                </div>
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); setConfirmModal({open: true, id: s.id}); }} className="text-red-400 hover:text-red-600 p-2"><Trash2 size={16}/></button>
+          </div>
+        ))}
+        {staff.filter(s=>s.type===type).length === 0 && <div className="text-center text-gray-400 text-sm py-4">등록된 인력이 없습니다.</div>}
+      </div>
+    </div>
+  );
+
+  const ServiceSection = ({ type, title, color }) => {
+    const relevantStaff = staff.filter(s => s.type === type);
+    const relevantRecords = serviceRecords.filter(r => relevantStaff.find(s => s.id === Number(r.staffId)));
+    
+    return (
+      <div className="flex-1 bg-white rounded-2xl shadow-lg border overflow-hidden flex flex-col">
+        <div className={`p-4 border-b flex justify-between items-center ${color === 'blue' ? 'bg-blue-50' : 'bg-green-50'}`}>
+          <h3 className="font-bold flex items-center gap-2 text-gray-700"><Case size={18}/> {title} 복무 관리</h3>
+          <button onClick={() => setServiceModal({ type, staffId: relevantStaff[0]?.id })} disabled={!relevantStaff.length} className="text-xs bg-white border px-3 py-1.5 rounded-lg font-bold hover:bg-gray-50 disabled:opacity-50">+ 기록</button>
+        </div>
+        <div className="p-4 flex-1 space-y-2 overflow-y-auto max-h-60 custom-scrollbar">
+          {relevantRecords.length > 0 ? relevantRecords.sort((a,b) => new Date(b.date) - new Date(a.date)).map(r => {
+             const st = staff.find(s => s.id === Number(r.staffId));
+             return (
+               <div key={r.id} className="text-sm p-3 bg-gray-50 rounded-xl border flex justify-between items-center">
+                 <div>
+                   <span className={`font-bold mr-2 ${color === 'blue' ? 'text-blue-600' : 'text-green-600'}`}>{st?.name}</span>
+                   <span className="text-gray-500 mr-2 text-xs">| {r.date} |</span>
+                   <span className="font-medium text-gray-700">{r.type}</span>
+                   {r.desc && <span className="text-gray-400 text-xs ml-2">- {r.desc}</span>}
+                 </div>
+                 <button onClick={() => setServiceRecords(serviceRecords.filter(i => i.id !== r.id))} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
+               </div>
+             )
+          }) : <div className="text-center text-gray-400 py-6 text-sm">복무 기록이 없습니다.</div>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-8 h-full flex flex-col overflow-y-auto">
+      <h2 className="text-3xl font-extrabold text-gray-800 mb-8">인력 관리</h2>
+      <div className="flex flex-col md:flex-row gap-6 max-w-6xl mb-8">
+        <StaffList type="practical" title="특수교육 실무사" color="blue"/>
+        <StaffList type="social" title="사회복무요원" color="green"/>
+      </div>
+      <div className="flex flex-col md:flex-row gap-6 max-w-6xl">
+        <ServiceSection type="practical" title="실무사" color="blue" />
+        <ServiceSection type="social" title="사회복무요원" color="green" />
+      </div>
+
+      {modal && (
+          <StaffFormModal 
+            isOpen={true}
+            onClose={() => setModal(null)}
+            onSave={saveStaff}
+            initialData={modal.data}
+            type={modal.type}
+            mode={modal.mode}
+            students={students}
+          />
+      )}
+      
+      {serviceModal && (
+        <UI.Modal onClose={() => setServiceModal(null)} title="복무 기록 등록" maxWidth="max-w-sm">
+          <form onSubmit={addService} className="p-6 space-y-4">
+              <UI.Select label="대상자" name="staffId" defaultValue={serviceModal.staffId} options={staff.filter(s => s.type === serviceModal.type).map(s => ({ value: s.id, label: s.name }))} onChange={(e) => setServiceModal({...serviceModal, staffId: e.target.value})} />
+              <UI.Select label="복무 유형" name="type" options={['연가', '병가', '조퇴', '지각', '외출', '출장', '교육', '기타'].map(o => ({ value: o, label: o }))} />
+              <UI.Input label="날짜" name="date" type="date" required />
+              <UI.Input label="내용 (선택)" name="desc" placeholder="사유 등 간단 메모" />
+              <UI.Btn className="w-full bg-gray-800 mt-2">저장</UI.Btn>
+          </form>
+        </UI.Modal>
+      )}
+      <ConfirmModal isOpen={confirmModal.open} message="정말 삭제하시겠습니까?" onConfirm={confirmDelete} onCancel={() => setConfirmModal({ open: false, id: null })} />
+    </div>
+  );
+}
+
+function StaffFormModal({ isOpen, onClose, onSave, initialData, type, mode, students }) {
+    const [name, setName] = useState(initialData?.name || '');
+    const [assignedStudentIds, setAssignedStudentIds] = useState(initialData?.assignedStudentIds || []);
+
+    const toggleStudent = (id) => {
+        if (assignedStudentIds.includes(id)) {
+            setAssignedStudentIds(assignedStudentIds.filter(sid => sid !== id));
+        } else {
+            setAssignedStudentIds([...assignedStudentIds, id]);
+        }
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave({ ...initialData, name, assignedStudentIds });
+    };
+
+    return (
+        <UI.Modal onClose={onClose} maxWidth="max-w-md" title={`${type === 'practical' ? '실무사' : '사회복무요원'} ${mode === 'add' ? '등록' : '수정'}`}>
+            <form onSubmit={handleSubmit} className="p-6">
+                <UI.Input 
+                    label="이름" 
+                    value={name} 
+                    onChange={e => setName(e.target.value)} 
+                    placeholder="이름을 입력하세요" 
+                    required 
+                    className="mb-6"
+                />
+                
+                <div className="mb-6">
+                    <label className="block text-xs font-bold text-gray-400 mb-2 ml-1">전담 지원 학생 선택</label>
+                    <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                        {students.length > 0 ? students.map(s => (
+                            <div 
+                                key={s.id} 
+                                onClick={() => toggleStudent(s.id)}
+                                className={`p-2 rounded-lg border cursor-pointer flex items-center gap-2 transition-colors ${assignedStudentIds.includes(s.id) ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-200 hover:bg-gray-50'}`}
+                            >
+                                <div className={`w-4 h-4 rounded border flex items-center justify-center ${assignedStudentIds.includes(s.id) ? 'bg-blue-500 border-blue-500' : 'bg-white border-gray-300'}`}>
+                                    {assignedStudentIds.includes(s.id) && <Check size={12} className="text-white"/>}
+                                </div>
+                                <span className="text-sm font-bold">{s.name}</span>
+                            </div>
+                        )) : <div className="col-span-2 text-center text-gray-400 text-xs">등록된 학생이 없습니다.</div>}
+                    </div>
+                </div>
+
+                <div className="flex gap-2">
+                    <UI.Btn type="button" variant="secondary" className="flex-1" onClick={onClose}>취소</UI.Btn>
+                    <UI.Btn type="submit" variant="blue" className="flex-1">저장</UI.Btn>
+                </div>
+            </form>
+        </UI.Modal>
+    );
+}
+
+// =================================================================================
+// [8] 시간표 및 수업 관리 컴포넌트
+// =================================================================================
+
+function ScheduleManager({ students, staff }) {
+  const [semester, setSemester] = useState(1);
+  const [schedule, setSchedule] = usePersistentState('integrated_schedule', {});
+  const [modal, setModal] = useState(null); 
+  const [confirmModal, setConfirmModal] = useState({ open: false, type: null }); 
+   
+  const days = ['월','화','수','목','금']; const periods = [1,2,3,4,5,6];
+  const safeStudents = Array.isArray(students) ? students : [];
+
+  const stats = useMemo(() => {
+    let teacherClasses = 0;
+    const supportCounts = {};
+    const studentSupportCounts = {}; // 학생별 지원 횟수
+
+    const currentSch = schedule[semester] || {};
+
+    Object.keys(currentSch).forEach(key => {
+       const slots = currentSch[key] || [];
+       if (slots.some(item => item.subject)) teacherClasses++;
+       slots.forEach(item => {
+           if (item.supportId) {
+               supportCounts[item.supportId] = (supportCounts[item.supportId] || 0) + 1;
+               // 학생 카운트
+               studentSupportCounts[item.studentId] = (studentSupportCounts[item.studentId] || 0) + 1;
+           }
+       });
+    });
+
+    return { teacherClasses, supportCounts, studentSupportCounts };
+  }, [schedule, semester, staff]);
+
+  const executeReset = () => {
+      setSchedule({ ...schedule, [semester]: {} });
+      setConfirmModal({ open: false, type: null });
+  };
+
+  // 자동 배치 로직 (고도화: 1인 1교실 원칙 + 대안 제시)
+  const executeAutoAssign = () => {
+    if(!staff.length) return alert('등록된 인력이 없습니다.');
+    
+    // 1. 초기화 (수업 및 차단 유지)
+    const newSch = { ...schedule, [semester]: { ...schedule[semester] } };
+    Object.keys(newSch[semester]).forEach(k => {
+        newSch[semester][k] = (newSch[semester][k] || []).filter(i => i.subject || i.blocked);
+    });
+
+    // 2. 인력별 전담 학생 매핑
+    const primaryStaffMap = {}; // StudentID -> StaffObject
+    staff.forEach(st => {
+        if (st.assignedStudentIds && Array.isArray(st.assignedStudentIds)) {
+            st.assignedStudentIds.forEach(sid => primaryStaffMap[sid] = st);
+        }
+    });
+
+    const studentSupportCounts = {}; 
+    const staffWorkCounts = {};      
+    safeStudents.forEach(s => studentSupportCounts[s.id] = 0);
+    staff.forEach(st => staffWorkCounts[st.id] = 0);
+
+    // 랜덤 셔플 헬퍼
+    const shuffle = (array) => array.sort(() => Math.random() - 0.5);
+
+    // 3. 시간표 순회
+    days.forEach(d => periods.forEach(p => {
+      const k = `${d}-${p}`;
+      const slots = newSch[semester][k] || [];
+      if (slots.some(s => s.blocked)) return;
+
+      const busyStudentIds = slots.filter(i => i.subject).map(i => i.studentId);
+      
+      // 지원 대상 학생 후보
+      let candidates = safeStudents.filter(s => !busyStudentIds.includes(s.id));
+      
+      // 후보 학생들을 "담당 인력" 별로 그룹화
+      // Key: StaffID, Value: [Students]
+      const groups = {};
+      const noStaffStudents = [];
+
+      candidates.forEach(s => {
+          const pStaff = primaryStaffMap[s.id];
+          if (pStaff) {
+              if (!groups[pStaff.id]) groups[pStaff.id] = [];
+              groups[pStaff.id].push(s);
+          } else {
+              noStaffStudents.push(s);
+          }
+      });
+
+      const selectedAssignments = [];
+      const busyStaffIds = new Set();
+
+      // 인력 그룹 처리 (순서 셔플 = 공정성)
+      const staffIds = shuffle(Object.keys(groups));
+      
+      staffIds.forEach(sid => {
+          const groupStudents = groups[sid];
+          // 해당 인력의 학생들 중 지원 횟수가 가장 적은 학생 우선 선발
+          groupStudents.sort((a, b) => {
+              const diff = studentSupportCounts[a.id] - studentSupportCounts[b.id];
+              return diff === 0 ? (Math.random() - 0.5) : diff;
+          });
+          
+          // 1인 1교실 원칙: 이 그룹에서 1명만 선택
+          const target = groupStudents[0];
+          const staffObj = staff.find(st => st.id === Number(sid));
+          
+          if (staffObj) {
+              selectedAssignments.push({ student: target, staff: staffObj });
+              busyStaffIds.add(staffObj.id);
+          }
+      });
+
+      // 담당자가 없는 학생들은 "남는 인력"에게 배정
+      const freeStaff = staff.filter(st => !busyStaffIds.has(st.id));
+      // 업무량 적은 순으로 정렬
+      freeStaff.sort((a, b) => staffWorkCounts[a.id] - staffWorkCounts[b.id]);
+
+      noStaffStudents.sort((a, b) => studentSupportCounts[a.id] - studentSupportCounts[b.id]);
+
+      while (freeStaff.length > 0 && noStaffStudents.length > 0) {
+          const s = noStaffStudents.shift();
+          const st = freeStaff.shift();
+          selectedAssignments.push({ student: s, staff: st });
+          staffWorkCounts[st.id]++; // 업무량 증가
+      }
+
+      // 배치 확정
+      if(!newSch[semester][k]) newSch[semester][k] = [];
+      selectedAssignments.forEach(({ student, staff }) => {
+          newSch[semester][k].push({ studentId: student.id, supportId: staff.id, subject: null });
+          studentSupportCounts[student.id]++;
+          staffWorkCounts[staff.id]++; 
+      });
+    }));
+
+    setSchedule(newSch);
+    setConfirmModal({ open: false, type: null });
+  };
+
+  const updateItem = (sid, key, val) => {
+    let newData = modal.data.filter(i => i.studentId !== sid);
+    if (val) newData.push({ studentId: sid, [key]: val, [key==='subject'?'supportId':'subject']: null });
+    setModal({ ...modal, data: newData });
+  };
+
+  const toggleBlock = () => {
+      const isBlocked = modal.data.some(i => i.blocked);
+      if (isBlocked) {
+          setModal({ ...modal, data: modal.data.filter(i => !i.blocked) });
+      } else {
+          setModal({ ...modal, data: [...modal.data, { blocked: true }] });
+      }
+  };
+
+  return (
+    <div className="p-8 h-full flex flex-col">
+      <header className="flex flex-col gap-6 mb-6 shrink-0">
+        <div className="flex justify-between items-center">
+          <div><h2 className="text-3xl font-extrabold text-gray-800">통합 시간표</h2><p className="text-gray-500">수업과 지원 인력을 배치하세요.</p></div>
+          <div className="flex gap-3">
+             <button onClick={() => setConfirmModal({ open: true, type: 'reset' })} className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors"><RotateCcw size={18}/> 초기화</button>
+             <button onClick={() => setConfirmModal({ open: true, type: 'auto' })} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-xl font-bold shadow-md hover:scale-105 transition-transform"><Wand2 size={18}/> 자동 배치</button>
+             <div className="bg-white p-1 rounded-xl shadow-md flex"><button onClick={()=>setSemester(1)} className={`px-4 py-2 rounded-lg font-bold ${semester===1?'bg-pink-400 text-white':'text-gray-400'}`}>1학기</button><button onClick={()=>setSemester(2)} className={`px-4 py-2 rounded-lg font-bold ${semester===2?'bg-blue-400 text-white':'text-gray-400'}`}>2학기</button></div>
+          </div>
+        </div>
+        
+        {/* 통계 바 */}
+        <div className="bg-gray-800 text-white rounded-2xl p-4 flex flex-wrap items-center shadow-lg gap-4">
+           {/* 1. 특수교사 시수 */}
+           <div className="flex items-center gap-3 px-2 pr-6">
+              <div className="bg-pink-500 p-2 rounded-lg"><GraduationCap size={20}/></div>
+              <div><p className="text-xs text-gray-400 font-bold">특수교사</p><p className="text-xl font-bold">{stats.teacherClasses}시간</p></div>
+           </div>
+           
+           <div className="w-px h-8 bg-gray-600 mx-2"></div>
+
+           {/* 2. 인력별 지원 횟수 */}
+           <div className="flex gap-4 overflow-x-auto custom-scrollbar items-center">
+              {staff.map(s => (
+                <div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap">
+                   <div className={`w-2 h-2 rounded-full ${s.type==='practical'?'bg-blue-400':'bg-green-400'}`}/>
+                   <div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.supportCounts[s.id] || 0}회 <span className="text-[10px] font-normal opacity-50">지원</span></p></div>
+                </div>
+              ))}
+           </div>
+
+           <div className="w-px h-8 bg-gray-600 mx-2"></div>
+
+           {/* 3. 학생별 지원받은 횟수 */}
+           <div className="flex gap-4 overflow-x-auto custom-scrollbar items-center flex-1">
+              {safeStudents.map(s => (
+                <div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap">
+                   <div className="w-2 h-2 rounded-full bg-yellow-400"/>
+                   <div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.studentSupportCounts[s.id] || 0}회 <span className="text-[10px] font-normal opacity-50">지원</span></p></div>
+                </div>
+              ))}
+           </div>
+        </div>
+      </header>
+      
+      <div className="flex-1 bg-white p-4 rounded-[2rem] shadow-xl overflow-hidden flex flex-col">
+        <div className="grid grid-cols-6 gap-2 mb-2 text-center h-12 shrink-0"><div className="font-bold text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center">교시</div>{days.map(d=><div key={d} className="font-extrabold text-lg text-gray-700 bg-gray-100 rounded-xl flex items-center justify-center">{d}</div>)}</div>
+        <div className="flex-1 grid grid-rows-6 gap-2">{periods.map(p => <div key={p} className="grid grid-cols-6 gap-2"><div className="font-bold text-xl text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center">{p}</div>{days.map(d => {
+          const items = schedule[semester]?.[`${d}-${p}`] || [];
+          const isBlocked = items.some(i => i.blocked);
+          
+          return (
+            <div key={d} onClick={()=>setModal({ day: d, period: p, data: JSON.parse(JSON.stringify(items)) })} className={`bg-white border-2 rounded-xl hover:border-pink-300 hover:shadow-lg cursor-pointer p-1 overflow-hidden relative group transition-all ${isBlocked ? 'border-gray-200 bg-gray-50' : 'border-gray-100'}`}>
+                {isBlocked ? (
+                    <div className="w-full h-full flex items-center justify-center"><X className="text-gray-300" size={32} /></div>
+                ) : (
+                    <div className="flex flex-wrap gap-1 justify-center content-start h-full">
+                        {items.map((i,x)=>{
+                            const s = safeStudents.find(s=>s.id===i.studentId); const st = staff.find(s=>s.id===i.supportId); 
+                            if(i.blocked) return null; 
+                            if(!s) return null;
+                            return <div key={x} className={`flex flex-col items-center text-[9px] px-1.5 py-0.5 rounded-md font-bold shadow-sm whitespace-nowrap ${i.subject ? (s.gender==='여'?'bg-pink-100 text-pink-700':'bg-blue-100 text-blue-700') : 'bg-green-100 text-green-700'}`}><span>{s.name}</span><span className="opacity-80 scale-90">{i.subject ? i.subject.split(' ')[0] : (st?`${st.type==='practical'?'T':'S'}.${st.name}`:'?')}</span></div>
+                        })}
+                    </div>
+                )}
+            </div>
+          );
+        })}</div>)}</div>
+      </div>
+      
+      {modal && <UI.Modal onClose={()=>setModal(null)} maxWidth="max-w-5xl" title={`${modal.day}요일 ${modal.period}교시 설정`}>
+        <div className="flex justify-between items-center px-6 py-2 bg-gray-50 border-b">
+            <span className="text-sm text-gray-500 font-bold">개별 설정</span>
+            <button 
+                onClick={toggleBlock} 
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-sm transition-colors ${modal.data.some(i=>i.blocked) ? 'bg-red-500 text-white' : 'bg-white border text-gray-500 hover:bg-gray-100'}`}
+            >
+                {modal.data.some(i=>i.blocked) ? <><CheckSquare size={16}/> 배정 금지 해제</> : <><Ban size={16}/> 배정 금지 (X)</>}
+            </button>
+        </div>
+        <div className={`flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 md:grid-cols-2 gap-4 ${modal.data.some(i=>i.blocked) ? 'opacity-50 pointer-events-none' : ''}`}>
+          {safeStudents.map(s => {
+            const entry = modal.data.find(i=>i.studentId===s.id);
+            const primaryStaff = staff.find(st => st.assignedStudentIds?.includes(s.id));
+
+            return (
+              <div key={s.id} className={`p-4 rounded-2xl border-2 transition-all ${entry ? (entry.subject ? (s.gender==='여'?'border-pink-400 bg-pink-50/30':'border-blue-400 bg-blue-50/30') : 'border-green-400 bg-green-50/30') : 'border-gray-100 bg-white'}`}>
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3"><img src={s.photo} className="w-10 h-10 rounded-full border bg-white"/><span className="font-bold">{s.name} <span className="text-xs font-normal text-gray-500">{s.grade}학년</span></span></div>
+                    {primaryStaff && <div className="text-[10px] bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full font-bold">담당: {primaryStaff.name}</div>}
+                </div>
+                <div className="space-y-2">
+                  <div><span className="text-[10px] font-bold text-gray-400">수업</span> <div className="flex flex-wrap gap-1">{s.targetSubjects?.map(subj=><button key={subj} onClick={()=>updateItem(s.id, 'subject', entry?.subject===subj?null:subj)} className={`px-2 py-1 rounded text-xs font-bold border ${entry?.subject===subj?'bg-gray-800 text-white':'bg-white text-gray-600'}`}>{subj}</button>)}</div></div>
+                  <div><span className="text-[10px] font-bold text-gray-400">지원</span> <div className="flex flex-wrap gap-1">{staff.map(st=><button key={st.id} onClick={()=>updateItem(s.id, 'supportId', entry?.supportId===st.id?null:st.id)} className={`px-2 py-1 rounded text-xs font-bold border ${entry?.supportId===st.id?'bg-green-600 text-white':'bg-white text-green-700'} ${primaryStaff?.id === st.id ? 'ring-2 ring-yellow-400' : ''}`}>{st.name}</button>)}</div></div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="p-4 border-t flex justify-end gap-2"><UI.Btn variant="secondary" className="px-12" onClick={()=>setModal(null)}>취소</UI.Btn><UI.Btn className="bg-gray-800 px-12" onClick={()=>{setSchedule({...schedule, [semester]: {...schedule[semester], [`${modal.day}-${modal.period}`]: modal.data}}); setModal(null)}}>저장</UI.Btn></div>
+      </UI.Modal>}
+      
+      <ConfirmModal 
+        isOpen={confirmModal.open} 
+        message={confirmModal.type === 'reset' ? "정말 이번 학기 시간표를 초기화하시겠습니까?" : "빈 시간에 지원 인력을 자동 배치하시겠습니까? (기존 지원 내역은 초기화됩니다)"}
+        onConfirm={confirmModal.type === 'reset' ? executeReset : executeAutoAssign} 
+        onCancel={() => setConfirmModal({ open: false, type: null })} 
+      />
+    </div>
+  );
+}
+
+// =================================================================================
+// [9] 개별화 교육(IEP) 관리 컴포넌트
+// =================================================================================
+
+function EducationManager({ students }) {
+  const [selectedStudent, setSelectedStudent] = useState(null);
+
+  return (
+    <div className="p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-8">
+            <h2 className="text-3xl font-extrabold text-gray-800">개별화 교육 계획</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          {students.map(s => (
+            <div key={s.id} onClick={() => setSelectedStudent(s)} className={`cursor-pointer rounded-3xl border-4 ${s.gender==='여'?'border-pink-200 bg-pink-50':'border-blue-200 bg-blue-50'} bg-white shadow-lg hover:-translate-y-2 transition-all overflow-hidden`}>
+              <div className="p-6 flex flex-col items-center">
+                <div className="w-32 h-32 rounded-full border-4 border-white shadow-md overflow-hidden bg-gray-100 mb-4 flex items-center justify-center"><img src={s.photo} className="w-full h-full object-cover" alt=""/></div>
+                <div className={`px-4 py-1 rounded-full mb-4 ${s.gender==='여'?'bg-pink-100':'bg-blue-100'}`}><h2 className="text-xl font-bold text-gray-800">{s.name}</h2></div>
+                <div className="w-full text-sm text-gray-500 space-y-1"><div className="flex justify-between"><span>학년/반</span><b>{s.grade}학년 {s.classNumber}반</b></div><div className="flex justify-between"><span>담임</span><b>{s.teacher}쌤</b></div></div>
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        {selectedStudent && (
+            <UI.Modal onClose={() => setSelectedStudent(null)} title={`${selectedStudent.name}의 개별화 교육 계획`}>
+                <div className="p-10 flex flex-col items-center justify-center text-gray-400 space-y-4">
+                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center">
+                        <Book size={40} className="opacity-50" />
+                    </div>
+                    <p className="text-lg font-bold">상세 교육 계획 구성 준비중입니다.</p>
+                    <p className="text-xs">이 곳에서 개별화 교육 계획(IEP)을 수립하고 관리할 수 있습니다.</p>
+                </div>
+                <div className="p-4 border-t flex justify-end">
+                    <UI.Btn variant="secondary" onClick={() => setSelectedStudent(null)}>닫기</UI.Btn>
+                </div>
+            </UI.Modal>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// [최종 수정] 예산 관리 컴포넌트 (삭제 연동, UI 통일, 숫자 입력 개선)
+function BudgetManager() {
+  // ★★★ 구글 앱스 스크립트 URL 확인 ★★★
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbwPGP3XD0UiXgBirn2vu9N0lzD_-0wOrJJuVaiA5MhSoHylwoYrEzH8G_Xu_5nHTjpo/exec"; 
+  
+  const [items, setItems] = useState([]); 
+  const [budgets, setBudgets] = usePersistentState('budget_definitions', [
+    { id: 'default', name: '학급운영비', total: 300000 }
+  ]); 
+  
+  const [activeTab, setActiveTab] = useState(budgets[0]?.name || '');
+  const [loading, setLoading] = useState(false);
+  const [modal, setModal] = useState(null); 
+
+  useEffect(() => {
+    if (budgets.length > 0 && !budgets.find(b => b.name === activeTab)) {
+      setActiveTab(budgets[0].name);
+    }
+  }, [budgets, activeTab]);
+
+  const stats = useMemo(() => {
+    const currentBudget = budgets.find(b => b.name === activeTab);
+    const totalLimit = currentBudget ? Number(currentBudget.total) : 0;
+    const currentItems = items.filter(i => i.category === activeTab);
+    const totalExpense = currentItems.reduce((acc, cur) => acc + Number(cur.amount), 0);
+    return { total: totalLimit, used: totalExpense, remain: totalLimit - totalExpense };
+  }, [items, budgets, activeTab]);
+
+  const fetchData = async () => {
+    if(!GAS_URL || GAS_URL.includes("여기에")) return;
+    setLoading(true);
+    try {
+      const res = await fetch(GAS_URL);
+      const data = await res.json();
+      setItems(Array.isArray(data) ? data : []);
+    } catch (err) { console.error("Load Error"); } 
+    finally { setLoading(false); }
+  };
+
+  // [데이터 저장] (추가/수정)
+  const saveItem = async (formData) => {
+    setLoading(true);
+    const newItem = formData.id ? formData : { ...formData, id: Date.now() };
+    
+    // 화면 즉시 반영
+    if (formData.id) setItems(items.map(i => i.id === formData.id ? newItem : i));
+    else setItems([newItem, ...items]);
+    setModal(null);
+
+    try {
+      await fetch(GAS_URL, {
+        method: "POST", mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newItem),
+      });
+    } catch (err) { alert("저장 중 오류가 발생했습니다."); } 
+    finally { setLoading(false); }
+  };
+
+  // [데이터 삭제] (New!)
+  const deleteItem = async (id) => {
+    if (!window.confirm("정말 이 내역을 삭제하시겠습니까? (구글 시트에서도 삭제됩니다)")) return;
+    
+    setLoading(true);
+    // 화면 즉시 반영
+    setItems(items.filter(i => i.id !== id));
+
+    try {
+      await fetch(GAS_URL, {
+        method: "POST", mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: 'delete', id: id }), // 삭제 요청 전송
+      });
+    } catch (err) { alert("삭제 중 오류가 발생했습니다."); } 
+    finally { setLoading(false); }
+  };
+
+  const saveBudget = (newBudget) => {
+    if (budgets.some(b => b.name === newBudget.name)) return alert("이미 존재하는 예산명입니다.");
+    setBudgets([...budgets, { ...newBudget, id: Date.now() }]);
+    setActiveTab(newBudget.name);
+    setModal(null);
+  };
+
+  const deleteBudget = () => {
+    if (budgets.length <= 1) return alert("최소 하나의 예산 항목은 있어야 합니다.");
+    if (!window.confirm(`'${activeTab}' 예산 항목을 삭제하시겠습니까?`)) return;
+    const newBudgets = budgets.filter(b => b.name !== activeTab);
+    setBudgets(newBudgets);
+    setActiveTab(newBudgets[0].name);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+  const fmt = (n) => new Intl.NumberFormat('ko-KR').format(n);
+  const filteredItems = items.filter(i => i.category === activeTab);
+
+  return (
+    <div className="p-8 h-full flex flex-col">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-3xl font-extrabold text-gray-800">학급 예산 관리</h2>
+        <div className="flex gap-2">
+          <button onClick={() => setModal('add_budget')} className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100 transition-colors">
+            <Plus size={18}/> 예산 항목 추가
+          </button>
+          <button onClick={fetchData} className={`p-2.5 rounded-full bg-white border shadow hover:bg-gray-50 ${loading ? 'animate-spin' : ''}`}>
+            <RefreshCcw size={20} className="text-gray-600"/>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-end border-b mb-6">
+        <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2 max-w-[80%]">
+          {budgets.map(b => (
+            <button 
+              key={b.id} 
+              onClick={() => setActiveTab(b.name)} 
+              className={`px-5 py-2 rounded-t-2xl text-sm font-bold whitespace-nowrap transition-all border-b-0 ${activeTab === b.name ? 'bg-gray-800 text-white shadow-lg translate-y-[1px]' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+            >
+              {b.name}
+            </button>
+          ))}
+        </div>
+        <button onClick={deleteBudget} className="mb-2 text-xs text-red-400 hover:text-red-600 font-bold flex items-center gap-1 px-3 py-1 bg-red-50 rounded-lg">
+          <Trash2 size={12}/> 현재 예산 삭제
+        </button>
+      </div>
+
+      {activeTab && (
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 mb-6 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div className="flex items-center gap-4 w-full md:w-auto">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl bg-pink-100 text-pink-600">📂</div>
+            <div>
+                <div className="text-sm text-gray-400 font-bold mb-1">{activeTab} 잔액</div>
+                <div className={`text-3xl font-extrabold ${stats.remain < 0 ? 'text-red-500' : 'text-gray-800'}`}>{fmt(stats.remain)}원</div>
+            </div>
+            </div>
+            <div className="flex gap-8 w-full md:w-auto bg-gray-50 p-4 rounded-2xl justify-around">
+            <div><div className="text-xs text-gray-400 font-bold">배정 예산</div><div className="text-lg font-bold text-blue-600">{fmt(stats.total)}</div></div>
+            <div className="w-px bg-gray-200"></div>
+            <div><div className="text-xs text-gray-400 font-bold">현재 사용액</div><div className="text-lg font-bold text-red-500">{fmt(stats.used)}</div></div>
+            </div>
+        </div>
+      )}
+
+      <div className="flex-1 bg-white rounded-[2rem] shadow border overflow-hidden flex flex-col">
+        <div className="p-4 bg-gray-50 border-b flex font-bold text-gray-500 text-xs text-center">
+          <div className="w-24">날짜</div>
+          <div className="w-24">사용처</div>
+          <div className="flex-1 text-left pl-4">내역</div>
+          <div className="w-24 text-right pr-4">금액</div>
+          <div className="w-16">관리</div>
+        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {filteredItems.length > 0 ? filteredItems.map(item => (
+            <div key={item.id} className="flex items-center p-4 border-b hover:bg-gray-50 transition-colors text-sm">
+              <div className="w-24 text-center text-gray-500 text-xs">{item.date}</div>
+              <div className="w-24 text-center"><span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-md text-xs font-bold truncate block">{item.vendor}</span></div>
+              <div className="flex-1 text-left pl-4 font-bold text-gray-700">
+                {item.item}
+                {item.memo && <span className="text-xs text-gray-400 font-normal ml-2">- {item.memo}</span>}
+              </div>
+              <div className="w-24 text-right pr-4 font-bold text-red-500">-{fmt(item.amount)}</div>
+              <div className="w-16 flex justify-center gap-2">
+                  <button onClick={() => setModal({ type: 'item', data: item })} className="text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
+                  <button onClick={() => deleteItem(item.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+              </div>
+            </div>
+          )) : (
+            <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-50"><Coins size={48} className="mb-4"/><p>지출 내역이 없습니다.</p></div>
+          )}
+        </div>
+      </div>
+
+      {activeTab && (
+        <button onClick={() => setModal({ type: 'item', data: null })} className="fixed bottom-8 right-8 w-16 h-16 bg-gray-800 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-transform z-20">
+            <Edit2 size={28}/>
+        </button>
+      )}
+
+      {/* 모달 통합 디자인 적용 */}
+      {modal === 'add_budget' && (
+        <UI.Modal onClose={() => setModal(null)} title="새 예산 항목 추가" maxWidth="max-w-sm">
+          <BudgetDefForm onSave={saveBudget} onClose={() => setModal(null)} />
+        </UI.Modal>
+      )}
+
+      {modal?.type === 'item' && (
+        <UI.Modal onClose={() => setModal(null)} title={modal.data ? "지출 내역 수정" : "지출 내역 기록"} maxWidth="max-w-sm">
+          <BudgetForm activeTab={activeTab} initialData={modal.data} onSave={saveItem} onClose={() => setModal(null)} />
+        </UI.Modal>
+      )}
+    </div>
+  );
+}
+
+function BudgetDefForm({ onSave, onClose }) {
+  const [name, setName] = useState('');
+  const [total, setTotal] = useState('');
+  
+  // 숫자만 입력받도록 처리 (스크롤 방지)
+  const handleNumber = (e, setter) => {
+    const val = e.target.value.replace(/[^0-9]/g, '');
+    setter(val);
+  };
+
+  return (
+    <div className="p-6">
+      <div className="bg-blue-50 p-4 rounded-xl text-xs text-blue-600 mb-6 font-bold flex gap-2 items-center">
+        <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center">💡</div>
+        '학급운영비', '간식비' 등 통장을 만드세요.
+      </div>
+      <div className="space-y-4">
+        <UI.Input label="예산명" value={name} onChange={e=>setName(e.target.value)} placeholder="예: 2학기 간식비" />
+        <UI.Input label="총 금액" value={total} onChange={e=>handleNumber(e, setTotal)} placeholder="숫자만 입력" />
+      </div>
+      <div className="flex gap-2 mt-6">
+        <UI.Btn variant="secondary" className="flex-1" onClick={onClose}>취소</UI.Btn>
+        <UI.Btn className="flex-1 bg-blue-500" onClick={() => { if(name&&total) onSave({name, total}); }}>만들기</UI.Btn>
+      </div>
+    </div>
+  );
+}
+
+function BudgetForm({ activeTab, initialData, onSave, onClose }) {
+  const [form, setForm] = useState(initialData || { 
+    date: new Date().toISOString().slice(0,10), 
+    category: activeTab, 
+    vendor: '', item: '', amount: '', memo: '' 
+  });
+  
+  const handleNumber = (e) => {
+    const val = e.target.value.replace(/[^0-9]/g, '');
+    setForm({...form, amount: val});
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if(!form.vendor || !form.item || !form.amount) return alert("필수 항목을 입력해주세요.");
+    onSave(form);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col h-full max-h-[80vh]">
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
+        <div className="bg-gray-50 border border-gray-100 p-3 rounded-xl text-sm font-bold text-center text-gray-600 flex justify-center items-center gap-2">
+           <div className="w-2 h-2 rounded-full bg-pink-500"></div> 선택된 예산: <span className="text-pink-600">{form.category}</span>
+        </div>
+        
+        <UI.Input label="날짜" type="date" value={form.date} onChange={e=>setForm({...form, date:e.target.value})} />
+        <UI.Input label="사용처 (구입처)" value={form.vendor} onChange={e=>setForm({...form, vendor:e.target.value})} placeholder="예: 쿠팡, 다이소" />
+        <UI.Input label="내역 (품목)" value={form.item} onChange={e=>setForm({...form, item:e.target.value})} placeholder="예: 색종이, 과자" />
+        
+        {/* 스크롤 방지된 숫자 입력 */}
+        <UI.Input label="금액" value={form.amount} onChange={handleNumber} placeholder="숫자만 입력 (스크롤 안됨)" />
+        
+        <UI.Input label="메모 (선택)" value={form.memo} onChange={e=>setForm({...form, memo:e.target.value})} placeholder="비고 사항" />
+      </div>
+      
+      <div className="p-4 border-t bg-white flex gap-2">
+        <UI.Btn type="button" variant="secondary" className="flex-1" onClick={onClose}>취소</UI.Btn>
+        <UI.Btn className="flex-1 bg-gray-800" type="submit">{initialData ? '수정완료' : '기록하기'}</UI.Btn>
+      </div>
+    </form>
+  );
+}
+// =================================================================================
+// [10] 사진첩 및 갤러리 컴포넌트
+// =================================================================================
+
+function PhotoManager() {
+  const [photos, setPhotos] = usePersistentState('class_photos', []);
+  const [modal, setModal] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({ open: false, id: null });
+   
+  const add = (p) => { setPhotos([{...p, id: Date.now(), comments:[], date: new Date().toLocaleDateString()}, ...photos]); setModal(null); };
+  const addComment = (pid, txt) => setPhotos(photos.map(p => p.id===pid ? {...p, comments:[{id:Date.now(), text:txt, author:'선생님'}, ...p.comments]} : p));
+  const confirmDelete = () => { if(confirmModal.id) { setPhotos(photos.filter(p=>p.id!==confirmModal.id)); setConfirmModal({open: false, id: null}); setModal(null); }};
+
+  return (
+    <div className="p-8 h-full flex flex-col">
+      <header className="flex justify-between items-center mb-8"><div><h2 className="text-3xl font-extrabold text-gray-800">학급 앨범</h2><p className="text-gray-500">소중한 순간들</p></div><span className="font-bold text-xl">{photos.length} <span className="text-xs font-normal">posts</span></span></header>
+      <div className="grid grid-cols-3 gap-1 md:gap-4">{photos.map(p => <div key={p.id} onClick={()=>setModal(p)} className="aspect-square bg-white border border-gray-200 rounded-xl overflow-hidden cursor-pointer group relative"><img src={p.url} className="w-full h-full object-contain"/><div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-4 font-bold"><Heart size={20}/> 0 <MessageCircle size={20}/> {p.comments.length}</div></div>)}</div>
+      <button onClick={()=>setModal('upload')} className="fixed bottom-8 right-8 w-16 h-16 bg-gradient-to-tr from-pink-500 to-rose-400 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-transform"><Plus size={32}/></button>
+      
+      {modal === 'upload' && <UI.Modal onClose={()=>setModal(null)} title="새 게시물" maxWidth="max-w-md"><PhotoUpload onSave={add}/></UI.Modal>}
+      {modal && modal !== 'upload' && <PhotoDetail photo={photos.find(p=>p.id===modal.id)} onClose={()=>setModal(null)} onDelete={(id) => setConfirmModal({open: true, id})} onComment={addComment}/>}
+      <ConfirmModal isOpen={confirmModal.open} message="정말 삭제하시겠습니까?" onConfirm={confirmDelete} onCancel={() => setConfirmModal({open: false, id: null})} />
+    </div>
+  );
+}
+
+function PhotoUpload({ onSave }) {
+  const [img, setImg] = useState(null); const [cap, setCap] = useState(''); const ref = useRef();
+  const handle = (e) => { const f=e.target.files[0]; if(f){ const r=new FileReader(); r.onloadend=()=>setImg(r.result); r.readAsDataURL(f); }};
+  return <div className="p-4"><div onClick={()=>ref.current.click()} className="aspect-square bg-white border-2 border-dashed rounded-xl flex items-center justify-center cursor-pointer mb-4 overflow-hidden">{img ? <img src={img} className="w-full h-full object-contain"/> : <span className="text-gray-400 font-bold">사진 선택</span>}<input type="file" ref={ref} onChange={handle} className="hidden" accept="image/*"/></div><textarea value={cap} onChange={e=>setCap(e.target.value)} className="w-full p-2 border rounded-xl resize-none text-sm" rows="3" placeholder="설명..."/><UI.Btn className="w-full mt-4 bg-blue-500" onClick={()=>img && onSave({url:img, caption:cap})}>공유하기</UI.Btn></div>;
+}
+
+function PhotoDetail({ photo, onClose, onDelete, onComment }) {
+  const [txt, setTxt] = useState('');
+  if (!photo) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 text-white"><X size={32}/></button>
+      <div className="bg-white rounded-[2rem] overflow-hidden w-full max-w-5xl h-[85vh] flex shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="w-3/5 bg-white flex items-center justify-center"><img src={photo.url} className="max-w-full max-h-full object-contain"/></div>
+        <div className="w-2/5 flex flex-col bg-white border-l">
+          <div className="p-4 border-b flex justify-between items-center"><div className="flex items-center gap-2"><div className="w-8 h-8 bg-yellow-200 rounded-full flex items-center justify-center">🌟</div><span className="font-bold text-sm">선생님</span></div><button onClick={()=>onDelete(photo.id)}><Trash2 size={18} className="text-red-400"/></button></div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+            <div className="flex gap-3"><div className="w-8 h-8 bg-yellow-100 rounded-full flex-shrink-0"/> <div className="bg-gray-100 p-3 rounded-2xl rounded-tl-none text-sm">{photo.caption}</div></div>
+            {photo.comments.map(c=><div key={c.id} className="flex gap-3"><div className="w-8 h-8 bg-pink-100 rounded-full flex-shrink-0"/> <div className="bg-white border p-3 rounded-2xl rounded-tl-none text-sm shadow-sm">{c.text}</div></div>)}
+          </div>
+          <form onSubmit={e=>{e.preventDefault(); if(txt.trim()){ onComment(photo.id, txt); setTxt(''); }}} className="p-4 border-t flex relative"><input value={txt} onChange={e=>setTxt(e.target.value)} className="w-full pl-4 pr-10 py-3 bg-gray-50 rounded-full border outline-none" placeholder="댓글..."/><button className="absolute right-6 top-1/2 -translate-y-1/2 text-blue-500 font-bold"><Send size={18}/></button></form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// =================================================================================
+// [11] 환경 설정 및 유틸리티 컴포넌트
+// =================================================================================
+
+function SettingsPage({ storedPw, setStoredPw, security, setSecurity, showGlobalError }) {
+  const [open, setOpen] = useState(null);
+  const [pw, setPw] = useState({ old: '', new: '', confirm: '' });
+  const [sec, setSec] = useState({ q: security?.question || SECURITY_QUESTIONS[0], a: '', cust: '' });
+  const fileRef = useRef();
+  const [confirmModal, setConfirmModal] = useState(false);
+
+  const handleBackup = () => {
+    const data = {}; STORAGE_KEYS.forEach(k => data[k] = localStorage.getItem(k));
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = url; a.download = `backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
+    showGlobalError('데이터가 백업되었습니다.');
+  };
+
+  const handleRestore = (e) => {
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if(!data.app_password) throw new Error();
+        setConfirmModal({ type: 'restore', data: data });
+      } catch { showGlobalError('잘못된 백업 파일입니다.'); }
+    };
+    reader.readAsText(file);
+  };
+  
+  const executeRestore = (data) => {
+      STORAGE_KEYS.forEach(k => { if(data[k]) localStorage.setItem(k, data[k]); });
+      alert('복구 완료! 새로고침합니다.'); window.location.reload();
+  };
+  
+  const executeReset = () => {
+      localStorage.clear(); window.location.reload();
+  };
+
+  return (
+    <div className="p-8"><div className="max-w-2xl mx-auto"><h2 className="text-3xl font-extrabold text-gray-800 mb-8">환경 설정</h2><div className="space-y-4">
+      
+      {/* 비밀번호 변경 */}
+      <div className="bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden">
+        <button onClick={() => setOpen(open==='pw' ? null : 'pw')} className="w-full p-6 flex justify-between items-center hover:bg-gray-50"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-pink-100 rounded-2xl flex items-center justify-center text-pink-500"><Key/></div><div className="text-left font-bold text-lg text-gray-800">비밀번호 변경</div></div>{open==='pw'?<ChevronUp/>:<ChevronDown/>}</button>
+        {open==='pw' && <div className="p-6 bg-gray-50 space-y-3"><input type="password" value={pw.old} onChange={e=>setPw({...pw, old:e.target.value})} className="w-full p-3 bg-white border rounded-xl" placeholder="현재 비번"/><input type="password" value={pw.new} onChange={e=>setPw({...pw, new:e.target.value})} className="w-full p-3 bg-white border rounded-xl" placeholder="새 비번"/><input type="password" value={pw.confirm} onChange={e=>setPw({...pw, confirm:e.target.value})} className="w-full p-3 bg-white border rounded-xl" placeholder="확인"/><UI.Btn className="w-full bg-gray-800" onClick={() => { if(pw.old!==storedPw) return showGlobalError('현재 비번 불일치'); if(pw.new!==pw.confirm) return showGlobalError('새 비번 불일치'); setStoredPw(pw.new); showGlobalError('변경 완료'); }}>변경</UI.Btn></div>}
+      </div>
+
+      {/* 보안 질문 변경 (복구) */}
+      <div className="bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden">
+        <button onClick={() => setOpen(open==='security' ? null : 'security')} className="w-full p-6 flex justify-between items-center hover:bg-gray-50"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-500"><HelpCircle/></div><div className="text-left font-bold text-lg text-gray-800">보안 질문 변경</div></div>{open==='security'?<ChevronUp/>:<ChevronDown/>}</button>
+        {open==='security' && <div className="p-6 bg-gray-50 space-y-3">
+             <div className="text-sm text-gray-400 font-bold mb-2">현재 비밀번호 확인</div>
+             <input type="password" className="w-full p-3 bg-white border rounded-xl mb-4" placeholder="비밀번호" onChange={e => { if(e.target.value === storedPw) setSec({...sec, verified: true}); }} />
+             {sec.verified && (
+                 <>
+                    <UI.Select label="새 질문 선택" options={SECURITY_QUESTIONS.map(q => ({ value: q, label: q }))} value={sec.q} onChange={e => setSec({...sec, q: e.target.value})} />
+                    {sec.q === '직접 입력' && <UI.Input value={sec.cust} onChange={e => setSec({...sec, cust: e.target.value})} placeholder="질문 입력" />}
+                    <UI.Input label="정답" value={sec.a} onChange={e => setSec({...sec, a: e.target.value})} placeholder="새 정답" />
+                    <UI.Btn className="w-full bg-blue-500 mt-2" onClick={() => { setSecurity({ question: sec.q==='직접 입력'?sec.cust:sec.q, answer: sec.a }); showGlobalError('보안 질문이 변경되었습니다.'); setOpen(null); }}>저장하기</UI.Btn>
+                 </>
+             )}
+        </div>}
+      </div>
+
+      {/* 데이터 관리 */}
+      <div className="bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden">
+        <button onClick={() => setOpen(open==='data' ? null : 'data')} className="w-full p-6 flex justify-between items-center hover:bg-gray-50"><div className="flex items-center gap-4"><div className="w-12 h-12 bg-green-100 rounded-2xl flex items-center justify-center text-green-600"><Database/></div><div className="text-left font-bold text-lg text-gray-800">데이터 관리</div></div>{open==='data'?<ChevronUp/>:<ChevronDown/>}</button>
+        {open==='data' && <div className="p-6 bg-gray-50 space-y-4">
+          <button onClick={handleBackup} className="w-full p-4 bg-white border-2 border-blue-100 rounded-2xl flex gap-4 items-center hover:bg-blue-50"><Download className="text-blue-500"/> <div className="text-left"><div className="font-bold">백업 (내보내기)</div><div className="text-xs text-gray-500">데이터를 파일로 저장</div></div></button>
+          <button onClick={() => fileRef.current.click()} className="w-full p-4 bg-white border-2 border-green-100 rounded-2xl flex gap-4 items-center hover:bg-green-50"><Upload className="text-green-500"/> <div className="text-left"><div className="font-bold">복구 (불러오기)</div><div className="text-xs text-gray-500">파일로 데이터 복원</div></div></button>
+          <input type="file" ref={fileRef} onChange={handleRestore} className="hidden" accept=".json" />
+          <button onClick={() => setConfirmModal({type: 'reset'})} className="w-full text-red-500 font-bold text-sm">⚠️ 데이터 초기화</button>
+        </div>}
+      </div>
+      
+      {confirmModal && (
+          <ConfirmModal 
+            isOpen={true} 
+            message={confirmModal.type === 'reset' ? '모든 데이터가 삭제됩니다. 계속하시겠습니까?' : '모든 데이터를 삭제하고 복구하시겠습니까?'}
+            onConfirm={() => confirmModal.type === 'reset' ? executeReset() : executeRestore(confirmModal.data)}
+            onCancel={() => setConfirmModal(null)}
+          />
+      )}
+    </div></div></div>
+  );
+}
+
+// 투두리스트 모달 (재사용 컴포넌트)
+function TodoListModal({ onClose }) {
+  const [todos, setTodos] = usePersistentState('teacher_todos', []);
+  const [input, setInput] = useState('');
+  const add = (e) => { e.preventDefault(); if(input.trim()) { setTodos([...todos, {id: Date.now(), text: input, done:false}]); setInput(''); }};
+
+  return (
+    <UI.Modal onClose={onClose} title="오늘의 할 일" maxWidth="max-w-md">
+      <div className="p-4 flex flex-col h-[60vh]">
+        <form onSubmit={add} className="flex gap-2 mb-4"><input value={input} onChange={e=>setInput(e.target.value)} className="flex-1 p-3 bg-gray-50 border rounded-xl" placeholder="할 일 입력" /><UI.Btn className="px-4 bg-blue-500">추가</UI.Btn></form>
+        <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
+          {todos.map(t => (
+            <div key={t.id} className={`flex items-center gap-3 p-3 rounded-xl border ${t.done ? 'bg-gray-50' : 'bg-white'}`}>
+              <button onClick={()=>setTodos(todos.map(i=>i.id===t.id?{...i, done:!i.done}:i))} className={`w-6 h-6 rounded border-2 flex items-center justify-center ${t.done?'bg-gray-300':'border-blue-400'}`}>{t.done && <Check size={14} className="text-white"/>}</button>
+              <span className={`flex-1 ${t.done?'text-gray-400 line-through':'text-gray-700'}`}>{t.text}</span>
+              <button onClick={()=>setTodos(todos.filter(i=>i.id!==t.id))}><Trash2 size={16} className="text-gray-300 hover:text-red-400"/></button>
+            </div>
+          ))}
+        </div>
+        <div className="pt-4 border-t mt-2"><UI.Btn variant="secondary" className="w-full" onClick={onClose}>닫기</UI.Btn></div>
+      </div>
+    </UI.Modal>
+  )
+}
+
+// 비밀번호 복구 모달
+function RecoveryModal({ securityData, onClose, onSuccess, onError }) {
+  const [step, setStep] = useState(1);
+  const [ans, setAns] = useState('');
+  const [pw, setPw] = useState({ new: '', conf: '' });
+
+  return (
+    <UI.Modal onClose={onClose} maxWidth="max-w-sm">
+      <div className="p-6 text-center">
+        <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl"><HelpCircle/></div>
+        {step === 1 ? (
+          <>
+            <h3 className="text-xl font-bold mb-2">본인 확인</h3>
+            <div className="bg-gray-50 p-4 rounded-xl mb-4 font-bold text-sm">Q. {securityData?.question}</div>
+            <UI.Input value={ans} onChange={e => setAns(e.target.value)} placeholder="정답 입력" className="mb-6"/>
+            <div className="flex gap-2"><UI.Btn variant="secondary" className="flex-1" onClick={onClose}>취소</UI.Btn><UI.Btn className="flex-1 bg-blue-500" onClick={() => ans === securityData?.answer ? setStep(2) : onError('오답입니다.')}>확인</UI.Btn></div>
+          </>
+        ) : (
+          <>
+            <h3 className="text-xl font-bold mb-4">비밀번호 재설정</h3>
+            <UI.Input type="password" value={pw.new} onChange={e => setPw({...pw, new:e.target.value})} placeholder="새 비밀번호" className="mb-2"/>
+            <UI.Input type="password" value={pw.conf} onChange={e => setPw({...pw, conf:e.target.value})} placeholder="확인" className="mb-6"/>
+            <UI.Btn className="w-full bg-blue-500" onClick={() => { if(pw.new.length<4) return onError('4자리 이상!'); if(pw.new!==pw.conf) return onError('불일치!'); onSuccess(pw.new); }}>변경하기</UI.Btn>
+          </>
+        )}
+      </div>
+    </UI.Modal>
+  );
+}
