@@ -1,52 +1,58 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Camera, Save, X, User, Plus, Lock, Calendar, GraduationCap, Image, Settings, Home, 
-  Trash2, Heart, Key, MessageCircle, Send, BookOpen, Check, Users, Briefcase, 
-  Wand2, CheckSquare, AlertCircle, HelpCircle, RefreshCcw, ChevronDown, ChevronUp, 
-  Edit2, Download, Upload, Database, Briefcase as Case, AlertTriangle, Ban, RotateCcw, 
-  Link as LinkIcon, Book, Coins, Clock
+  Camera, X, User, Plus, Lock, Calendar, GraduationCap, Image, Settings, Home, 
+  Trash2, Check, Users, Briefcase, Wand2, RefreshCcw, Edit2, Download, Upload, 
+  Database, AlertTriangle, BookOpen, Coins, Clock, Link as LinkIcon, RotateCcw,
+  ChevronLeft, ChevronRight, MoreHorizontal, MapPin
 } from 'lucide-react';
 
 // =================================================================================
-// [1] 전역 상수 및 설정
+// [1] 전역 상수 및 유틸리티
 // =================================================================================
 
 const TARGET_SUBJECTS = ['📕 국어', '📐 수학', '🌏 사회', '⚗️ 과학', '⚖️ 도덕', '🅰️ 영어', '🏃 체육', '🎵 음악', '🎨 미술', '💻 실과', '🍳 요리', '✨ 특색'];
 const DEFAULT_AVATARS = Array.from({ length: 6 }, (_, i) => `/default-avatars/avatar${i + 1}.png`);
 const SECURITY_QUESTIONS = ['보물 1호는?', '추억의 장소는?', '좋아하는 음식은?', '직접 입력'];
-const STORAGE_KEYS = ['app_password', 'app_security', 'students_data', 'staff_data', 'integrated_schedule', 'class_photos', 'teacher_todos', 'service_records', 'budget_definitions', 'grade_timetables'];
+const STORAGE_KEYS = ['app_password', 'app_security', 'students_data', 'staff_data', 'integrated_schedule', 'class_photos', 'teacher_todos', 'service_records', 'budget_definitions', 'grade_timetables', 'teacher_schedules', 'class_status_memo'];
+const COLORS = ['red','orange','amber','green','emerald','teal','cyan','blue','indigo','violet','purple','fuchsia','pink','rose'];
+const getStudentColor = (id) => { const c = COLORS[id % COLORS.length]; return `bg-${c}-100 border-${c}-200 text-${c}-800`; };
 
-// 학생별 고유 색상 팔레트 (파스텔톤)
-const STUDENT_COLORS = [
-  'bg-red-100 border-red-200 text-red-800', 'bg-orange-100 border-orange-200 text-orange-800',
-  'bg-amber-100 border-amber-200 text-amber-800', 'bg-green-100 border-green-200 text-green-800',
-  'bg-emerald-100 border-emerald-200 text-emerald-800', 'bg-teal-100 border-teal-200 text-teal-800',
-  'bg-cyan-100 border-cyan-200 text-cyan-800', 'bg-blue-100 border-blue-200 text-blue-800',
-  'bg-indigo-100 border-indigo-200 text-indigo-800', 'bg-violet-100 border-violet-200 text-violet-800',
-  'bg-purple-100 border-purple-200 text-purple-800', 'bg-fuchsia-100 border-fuchsia-200 text-fuchsia-800',
-  'bg-pink-100 border-pink-200 text-pink-800', 'bg-rose-100 border-rose-200 text-rose-800'
-];
-
-const getStudentColor = (id) => STUDENT_COLORS[id % STUDENT_COLORS.length] || STUDENT_COLORS[0];
-
-const usePersistentState = (key, initialValue) => {
-  const [state, setState] = useState(() => {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : initialValue;
-    } catch { return initialValue; }
-  });
+const usePersistentState = (key, init) => {
+  const [state, setState] = useState(() => { try { return JSON.parse(localStorage.getItem(key)) || init; } catch { return init; } });
   useEffect(() => localStorage.setItem(key, JSON.stringify(state)), [key, state]);
   return [state, setState];
-}
+};
+
+// API 호출 헬퍼
+const callGAS = async (url, body) => {
+  if (!url || url.includes("여기에")) return null;
+  const opts = body ? { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined;
+  const res = await fetch(url, opts);
+  return body ? true : await res.json();
+};
+
+const callGemini = async (apiKey, prompt, retries = 3) => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
+    const data = await res.json();
+    if (data.error) {
+      if ((data.error.code === 503 || data.error.message.includes("overloaded")) && retries > 0) {
+        await new Promise(r => setTimeout(r, 1500)); return callGemini(apiKey, prompt, retries - 1);
+      }
+      throw new Error(data.error.message);
+    }
+    return data.candidates?.[0]?.content?.parts?.[0]?.text;
+  } catch (e) { throw e; }
+};
 
 // =================================================================================
-// [2] UI 컴포넌트
+// [2] UI 컴포넌트 (디자인 유지 + 한글 입력 최적화)
 // =================================================================================
 
 const UI = {
   Btn: ({ children, onClick, className = "", variant = "primary", ...props }) => {
-    const base = "py-3 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2";
+    const base = "py-3 px-4 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2";
     const variants = {
       primary: "bg-pink-400 hover:bg-pink-500 text-white shadow-md",
       secondary: "bg-gray-100 hover:bg-gray-200 text-gray-600",
@@ -59,7 +65,7 @@ const UI = {
   Input: ({ label, className = "", ...props }) => (
     <div className="w-full">
       {label && <label className="block text-xs font-bold text-gray-400 mb-1 ml-1">{label}</label>}
-      <input className={`w-full p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-pink-200 ${className}`} {...props} />
+      <input lang="ko" className={`w-full p-3 bg-gray-50 border rounded-xl outline-none focus:ring-2 focus:ring-pink-200 ${className}`} {...props} />
     </div>
   ),
   Select: ({ label, options, ...props }) => (
@@ -71,11 +77,7 @@ const UI = {
     </div>
   ),
   Modal: ({ children, onClose, title, maxWidth = "max-w-2xl" }) => {
-    useEffect(() => {
-      const handleEsc = (e) => e.key === 'Escape' && onClose();
-      window.addEventListener('keydown', handleEsc);
-      return () => window.removeEventListener('keydown', handleEsc);
-    }, [onClose]);
+    useEffect(() => { const h = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [onClose]);
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in-up" onClick={onClose}>
         <div className={`bg-white rounded-[2rem] shadow-2xl w-full ${maxWidth} overflow-hidden max-h-[90vh] flex flex-col`} onClick={e => e.stopPropagation()}>
@@ -97,13 +99,10 @@ const UI = {
 };
 
 const ConfirmModal = ({ isOpen, message, onConfirm, onCancel }) => !isOpen ? null : (
-  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-    <div className="bg-white rounded-2xl shadow-2xl p-6 w-80 text-center animate-bounce-short">
-      <AlertTriangle size={24} className="text-red-500 mx-auto mb-4"/>
-      <h3 className="text-lg font-bold text-gray-800 mb-2">확인</h3><p className="text-gray-600 text-sm mb-6">{message}</p>
-      <div className="flex gap-2"><UI.Btn variant="secondary" className="flex-1" onClick={onCancel}>취소</UI.Btn><UI.Btn variant="danger" className="flex-1" onClick={onConfirm}>확인</UI.Btn></div>
-    </div>
-  </div>
+  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"><div className="bg-white rounded-2xl shadow-2xl p-6 w-80 text-center animate-bounce-short">
+    <AlertTriangle size={24} className="text-red-500 mx-auto mb-4"/><h3 className="text-lg font-bold text-gray-800 mb-2">확인</h3><p className="text-gray-600 text-sm mb-6">{message}</p>
+    <div className="flex gap-2"><UI.Btn variant="secondary" className="flex-1" onClick={onCancel}>취소</UI.Btn><UI.Btn variant="danger" className="flex-1" onClick={onConfirm}>확인</UI.Btn></div>
+  </div></div>
 );
 
 // =================================================================================
@@ -122,14 +121,11 @@ export default function App() {
 
   const handleAuth = () => {
     if (auth.setupMode) {
-      if (setup.pw.length < 4) return setModal({ type: 'error', msg: '비밀번호 4자리 이상' });
-      if (!setup.a.trim()) return setModal({ type: 'error', msg: '답변 입력 필수' });
-      setStoredPw(setup.pw);
-      setSecurity({ question: setup.q === '직접 입력' ? setup.customQ : setup.q, answer: setup.a });
+      if (setup.pw.length < 4 || !setup.a.trim()) return setModal({ type: 'error', msg: '입력 정보를 확인하세요' });
+      setStoredPw(setup.pw); setSecurity({ question: setup.q === '직접 입력' ? setup.customQ : setup.q, answer: setup.a });
       setAuth({ setupMode: false, authenticated: true });
     } else {
-      if (pwInput === storedPw) setAuth({ ...auth, authenticated: true });
-      else { setModal({ type: 'error', msg: '비밀번호 불일치' }); setPwInput(''); }
+      if (pwInput === storedPw) setAuth({ ...auth, authenticated: true }); else { setModal({ type: 'error', msg: '비밀번호 불일치' }); setPwInput(''); }
     }
   };
 
@@ -139,22 +135,17 @@ export default function App() {
         <div className="flex justify-center mb-6"><div className="w-24 h-24 bg-yellow-200 rounded-full flex items-center justify-center text-4xl shadow-inner">🌟</div></div>
         <h1 className="text-2xl font-extrabold text-gray-700 mb-2">{auth.setupMode ? '환영합니다!' : '선생님, 안녕하세요!'}</h1>
         {auth.setupMode ? (
-          <div className="space-y-4 text-left">
-            <UI.Input label="비밀번호 설정" type="password" value={setup.pw} onChange={e => setSetup({...setup, pw: e.target.value})} />
+          <div className="space-y-4 text-left"><UI.Input label="비밀번호 설정" type="password" value={setup.pw} onChange={e => setSetup({...setup, pw: e.target.value})} />
             <UI.Select label="본인 확인 질문" options={SECURITY_QUESTIONS.map(q => ({ value: q, label: q }))} value={setup.q} onChange={e => setSetup({...setup, q: e.target.value})} />
-            {setup.q === '직접 입력' && <UI.Input className="mt-2" value={setup.customQ} onChange={e => setSetup({...setup, customQ: e.target.value})} placeholder="질문 입력" />}
-            <UI.Input className="mt-2" value={setup.a} onChange={e => setSetup({...setup, a: e.target.value})} placeholder="정답 입력" />
-            <UI.Btn className="w-full mt-2" onClick={handleAuth}>시작하기</UI.Btn>
+            {setup.q === '직접 입력' && <UI.Input value={setup.customQ} onChange={e => setSetup({...setup, customQ: e.target.value})} placeholder="질문 입력" />}
+            <UI.Input value={setup.a} onChange={e => setSetup({...setup, a: e.target.value})} placeholder="정답 입력" /><UI.Btn className="w-full mt-2" onClick={handleAuth}>시작하기</UI.Btn>
           </div>
-        ) : (
-          <><div className="relative mb-4"><UI.Input type="password" value={pwInput} onChange={e => setPwInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAuth()} placeholder="••••" className="text-center text-xl tracking-[0.5em]" /><Lock size={20} className="absolute top-9 right-4 text-gray-300"/></div><UI.Btn className="w-full" onClick={handleAuth}>로그인</UI.Btn><button onClick={() => setModal({ type: 'recovery' })} className="mt-4 text-xs text-gray-400 underline">비밀번호 찾기</button></>
-        )}
+        ) : (<><div className="relative mb-4"><UI.Input type="password" value={pwInput} onChange={e => setPwInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleAuth()} placeholder="••••" className="text-center text-xl tracking-[0.5em]" /><Lock size={20} className="absolute top-9 right-4 text-gray-300"/></div><UI.Btn className="w-full" onClick={handleAuth}>로그인</UI.Btn><button onClick={() => setModal({ type: 'recovery' })} className="mt-4 text-xs text-gray-400 underline">비밀번호 찾기</button></>)}
       </div>
-      {modal.type === 'error' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setModal({ type: null })}><div className="bg-white p-6 rounded-3xl w-80 text-center"><AlertCircle size={48} className="text-red-400 mx-auto mb-4" /><p className="text-gray-500 mb-6">{modal.msg}</p><UI.Btn className="w-full bg-gray-800" onClick={() => setModal({ type: null })}>확인</UI.Btn></div></div>}
+      {modal.type === 'error' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setModal({ type: null })}><div className="bg-white p-6 rounded-3xl w-80 text-center"><AlertTriangle size={48} className="text-red-400 mx-auto mb-4" /><p className="text-gray-500 mb-6">{modal.msg}</p><UI.Btn className="w-full bg-gray-800" onClick={() => setModal({ type: null })}>확인</UI.Btn></div></div>}
       {modal.type === 'recovery' && <RecoveryModal securityData={security} onClose={() => setModal({ type: null })} onSuccess={p=>{setStoredPw(p); setModal({type:'error', msg:'재설정되었습니다.'})}} onError={msg => setModal({ type: 'error', msg })} />}
     </div>
   );
-
   return <MainLayout storedPw={storedPw} security={security} showGlobalError={msg => setModal({ type: 'error', msg })} />;
 }
 
@@ -163,42 +154,29 @@ export default function App() {
 // =================================================================================
 
 function MainLayout({ storedPw, showGlobalError }) {
-  const [menu, setMenu] = useState('dashboard');
+  const [menu, setMenu] = useState('home');
   const [students, setStudents] = usePersistentState('students_data', []);
   const [staff, setStaff] = usePersistentState('staff_data', []);
   const [secCheck, setSecCheck] = useState({ open: false, target: null, input: '' });
 
+  // [수정사항 1] 순서 변경 및 대시보드 -> 홈
   const MENU_ITEMS = [
-    { id: 'dashboard', label: '대시보드', icon: Home },
+    { id: 'home', label: '홈', icon: Home },
     { id: 'students', label: '학생관리', icon: User, protected: true },
-    { id: 'personnel', label: '지원인력', icon: Users, protected: true },
-    { id: 'budget', label: '예산', icon: Coins, protected: true },
     { id: 'schedule', label: '시간표', icon: Calendar },
+    { id: 'personnel', label: '지원인력', icon: Users, protected: true },
     { id: 'education', label: '개별화교육', icon: GraduationCap, protected: true },
-    { id: 'photos', label: '활동사진', icon: Image },
-    { id: 'settings', label: '설정', icon: Settings, protected: true },
+    { id: 'photos', label: '학급앨범', icon: Image },
+    { id: 'budget', label: '예산', icon: Coins, protected: true },
+    { id: 'settings', label: '환경설정', icon: Settings, protected: true },
   ];
 
-  const navigate = (id, isProtected) => {
-    if (menu === id) return;
-    if (isProtected) setSecCheck({ open: true, target: id, input: '' });
-    else setMenu(id);
-  };
-
-  const verify = (e) => {
-    e.preventDefault();
-    if (secCheck.input === storedPw) {
-      setMenu(secCheck.target);
-      setSecCheck({ ...secCheck, open: false });
-    } else showGlobalError('비밀번호 불일치');
-  };
+  const navigate = (id, isProtected) => { if (menu === id) return; isProtected ? setSecCheck({ open: true, target: id, input: '' }) : setMenu(id); };
+  const verify = (e) => { e.preventDefault(); if (secCheck.input === storedPw) { setMenu(secCheck.target); setSecCheck({ ...secCheck, open: false }); } else showGlobalError('비밀번호 불일치'); };
 
   const commonProps = { students, setStudents, staff, setStaff, showGlobalError };
-  const Page = { 
-    dashboard: Dashboard, students: StudentManager, personnel: PersonnelManager, 
-    budget: BudgetManager, schedule: ScheduleManager, education: EducationManager, 
-    photos: PhotoManager, settings: SettingsPage 
-  }[menu] || Dashboard;
+  // Dashboard -> Home으로 변경
+  const Page = { home: HomeManager, students: StudentManager, personnel: PersonnelManager, budget: BudgetManager, schedule: ScheduleManager, education: EducationManager, photos: PhotoManager, settings: SettingsPage }[menu] || HomeManager;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex font-sans text-gray-700">
@@ -221,568 +199,309 @@ function MainLayout({ storedPw, showGlobalError }) {
 }
 
 // =================================================================================
-// [5] 대시보드
+// [5] 홈 (구 대시보드 - 전면 개편)
 // =================================================================================
 
-function Dashboard({ students, staff }) {
-  const [todoOpen, setTodoOpen] = useState(false);
-  const getAssignedStaffName = (sid) => staff.filter(s => s.assignedStudentIds?.includes(sid)).map(s => s.name).join(', ');
+function HomeManager() {
+  const [schedules, setSchedules] = usePersistentState('teacher_schedules', {});
+  const [todos, setTodos] = usePersistentState('teacher_todos', []);
+  const [classMemo, setClassMemo] = usePersistentState('class_status_memo', '');
+  
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(null); // 일정 추가용 모달
+  const [todoInput, setTodoInput] = useState('');
+
+  // 달력 계산 로직
+  const getCalendarDays = () => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const lastDate = new Date(year, month + 1, 0).getDate();
+    const days = [];
+    
+    for (let i = 0; i < firstDay; i++) days.push(null); // 빈칸
+    for (let i = 1; i <= lastDate; i++) days.push(new Date(year, month, i));
+    return days;
+  };
+
+  const moveMonth = (delta) => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1));
+  };
+
+  const handleAddSchedule = (title, type = 'default') => {
+    const dateStr = selectedDate.toISOString().slice(0, 10);
+    const newSchedule = { id: Date.now(), title, type };
+    setSchedules(prev => ({
+      ...prev,
+      [dateStr]: [...(prev[dateStr] || []), newSchedule]
+    }));
+    setSelectedDate(null);
+  };
+
+  const deleteSchedule = (dateStr, id) => {
+    setSchedules(prev => ({
+      ...prev,
+      [dateStr]: prev[dateStr].filter(s => s.id !== id)
+    }));
+  };
+
+  const addTodo = (e) => {
+    e.preventDefault();
+    if (!todoInput.trim()) return;
+    setTodos([...todos, { id: Date.now(), text: todoInput, done: false }]);
+    setTodoInput('');
+  };
+
+  const dateString = (date) => date ? date.toISOString().slice(0, 10) : '';
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <h2 className="text-3xl font-extrabold text-gray-800 mb-10">오늘의 학급 현황</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-        <UI.Card icon={<Users/>} title="등록 학생" value={`${students.length}명`} color="pink" />
-        <div onClick={() => setTodoOpen(true)}><UI.Card icon={<Calendar/>} title="오늘의 일정" value="확인하기" color="blue" /></div>
-        <UI.Card icon={<Image/>} title="새 활동 사진" value="앨범보기" color="purple" />
-      </div>
-      <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-white">
-        <h3 className="text-xl font-bold text-gray-800 mb-6">우리 반 아이들</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {students.length > 0 ? students.map(s => (
-            <div key={s.id} className="flex items-center gap-4 p-4 rounded-2xl bg-gray-50 border border-gray-100 hover:shadow-md transition-all">
-               <img src={s.photo} className="w-14 h-14 rounded-full object-cover border bg-white flex-shrink-0"/>
-               <div className="flex-1 min-w-0">
-                  <p className="font-bold text-gray-800 text-lg truncate">{s.name}</p>
-                  <p className="text-xs text-gray-500 truncate">{s.grade}학년 {s.classNumber}반</p>
-                  {getAssignedStaffName(s.id) && <div className="mt-1 flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full w-fit"><Briefcase size={10} /> 담당: {getAssignedStaffName(s.id)}</div>}
-               </div>
-            </div>
-          )) : <div className="col-span-full text-center py-10 text-gray-400">학생이 없습니다.</div>}
+    <div className="p-8 h-full flex flex-col gap-6 overflow-y-auto">
+      {/* 1. 상단: 날짜 및 타이틀 */}
+      <div className="flex justify-between items-center shrink-0">
+        <div>
+          <h2 className="text-3xl font-extrabold text-gray-800">나의 교무 수첩</h2>
+          <p className="text-gray-500 text-sm mt-1">{new Date().toLocaleDateString()} 오늘 하루도 힘내세요! 💪</p>
+        </div>
+        <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-xl shadow-sm border">
+          <button onClick={() => moveMonth(-1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronLeft/></button>
+          <span className="text-xl font-bold w-32 text-center">{currentDate.getFullYear()}. {currentDate.getMonth() + 1}</span>
+          <button onClick={() => moveMonth(1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronRight/></button>
         </div>
       </div>
-      {todoOpen && <TodoListModal onClose={() => setTodoOpen(false)} />}
+
+      <div className="flex-1 flex gap-6 min-h-0">
+        {/* 2. 좌측: 캘린더 (메인) */}
+        <div className="flex-1 bg-white rounded-[2rem] shadow-lg border border-gray-100 p-6 flex flex-col">
+          <div className="grid grid-cols-7 mb-4 text-center font-bold text-gray-400">
+            {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
+              <div key={d} className={i === 0 ? 'text-red-400' : (i === 6 ? 'text-blue-400' : '')}>{d}</div>
+            ))}
+          </div>
+          <div className="flex-1 grid grid-cols-7 grid-rows-5 gap-2">
+            {getCalendarDays().map((date, idx) => {
+              if (!date) return <div key={idx} className="bg-gray-50/50 rounded-xl" />;
+              const dStr = dateString(date);
+              const daySchedules = schedules[dStr] || [];
+              const isToday = dStr === new Date().toISOString().slice(0, 10);
+              
+              return (
+                <div key={idx} onClick={() => setSelectedDate(date)} className={`relative p-2 rounded-xl border transition-all cursor-pointer hover:border-pink-300 hover:shadow-md flex flex-col gap-1 ${isToday ? 'bg-pink-50 border-pink-200' : 'bg-white border-gray-100'}`}>
+                  <span className={`text-sm font-bold ${date.getDay() === 0 ? 'text-red-400' : 'text-gray-600'}`}>{date.getDate()}</span>
+                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
+                    {daySchedules.map(sch => (
+                      <div key={sch.id} className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold truncate">
+                        {sch.title}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3. 우측: 사이드 위젯 (할일 & 메모) */}
+        <div className="w-80 flex flex-col gap-6 shrink-0">
+          {/* 오늘의 학급 기록 (직접 입력) */}
+          <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-yellow-100 flex flex-col h-1/3">
+            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Edit2 size={18} className="text-yellow-500"/> 오늘의 학급 기록</h3>
+            <textarea 
+              lang="ko"
+              value={classMemo} 
+              onChange={(e) => setClassMemo(e.target.value)} 
+              className="flex-1 w-full p-4 bg-yellow-50 rounded-xl border-none outline-none resize-none text-sm leading-relaxed placeholder-yellow-300/50"
+              placeholder="오늘 아이들의 특이사항이나 기억할 점을 자유롭게 기록하세요."
+            />
+          </div>
+
+          {/* 오늘의 할 일 */}
+          <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-purple-100 flex-1 flex flex-col">
+            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Check size={18} className="text-purple-500"/> 오늘의 할 일</h3>
+            <form onSubmit={addTodo} className="flex gap-2 mb-4">
+              <input lang="ko" value={todoInput} onChange={e => setTodoInput(e.target.value)} className="flex-1 bg-gray-50 px-3 py-2 rounded-xl text-sm outline-none border focus:border-purple-300" placeholder="할 일 입력" />
+              <button type="submit" className="bg-purple-500 text-white p-2 rounded-xl"><Plus size={18}/></button>
+            </form>
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+              {todos.length > 0 ? todos.map(t => (
+                <div key={t.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl group">
+                  <button onClick={() => setTodos(todos.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${t.done ? 'bg-purple-500 border-purple-500' : 'border-gray-300'}`}>
+                    {t.done && <Check size={12} className="text-white"/>}
+                  </button>
+                  <span className={`flex-1 text-sm ${t.done ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{t.text}</span>
+                  <button onClick={() => setTodos(todos.filter(x => x.id !== t.id))} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={16}/></button>
+                </div>
+              )) : <div className="text-center text-gray-400 text-xs py-10">등록된 할 일이 없습니다.</div>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 일정 추가 모달 */}
+      {selectedDate && (
+        <UI.Modal onClose={() => setSelectedDate(null)} title={`${selectedDate.getMonth()+1}월 ${selectedDate.getDate()}일 일정`} maxWidth="max-w-sm">
+          <div className="p-6">
+            <div className="space-y-2 mb-6 max-h-40 overflow-y-auto">
+              {(schedules[dateString(selectedDate)] || []).map(s => (
+                <div key={s.id} className="flex justify-between items-center p-2 bg-gray-50 rounded-lg text-sm">
+                  <span>{s.title}</span>
+                  <button onClick={() => deleteSchedule(dateString(selectedDate), s.id)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
+                </div>
+              ))}
+              {(schedules[dateString(selectedDate)] || []).length === 0 && <p className="text-gray-400 text-center text-xs">일정이 없습니다.</p>}
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); handleAddSchedule(e.target.title.value); }}>
+              <UI.Input name="title" placeholder="새 일정 입력 (예: 회의)" className="mb-2" autoFocus />
+              <UI.Btn type="submit" className="w-full bg-blue-500 text-white">추가하기</UI.Btn>
+            </form>
+          </div>
+        </UI.Modal>
+      )}
     </div>
   );
 }
 
 // =================================================================================
-// [6] 학생 관리 (중증도 추가)
+// [6] 학생 관리
 // =================================================================================
 
 function StudentManager({ students, setStudents }) {
   const [modal, setModal] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ open: false, id: null });
-   
-  const save = (data) => {
-    const updated = modal.type === 'add' 
-      ? [...students, { ...data, id: Date.now(), photo: DEFAULT_AVATARS[students.length % 6] }] 
-      : students.map(s => s.id === data.id ? data : s);
-    setStudents(updated);
-    setModal({ type: 'success' });
-  };
-
+  const save = (data) => { setStudents(modal.type === 'add' ? [...students, { ...data, id: Date.now(), photo: DEFAULT_AVATARS[students.length % 6] }] : students.map(s => s.id === data.id ? data : s)); setModal({ type: 'success' }); };
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-8"><h2 className="text-3xl font-extrabold text-gray-800">학생 관리</h2><UI.Btn onClick={() => setModal({ type: 'add' })} className="bg-gray-800 px-6 rounded-full"><Plus size={20}/> 학생 등록</UI.Btn></div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-        {students.map(s => (
-          <div key={s.id} onClick={() => setModal({ type: 'edit', data: s })} className={`cursor-pointer rounded-3xl border-4 ${getStudentColor(s.id)} bg-white shadow-lg hover:-translate-y-2 transition-all overflow-hidden`}>
-            <div className="p-6 flex flex-col items-center">
-              <div className="w-32 h-32 rounded-full border-4 border-white shadow-md overflow-hidden bg-gray-100 mb-4 flex items-center justify-center"><img src={s.photo} className="w-full h-full object-cover"/></div>
-              <div className="px-4 py-1 rounded-full mb-4 bg-white/50 border"><h2 className="text-xl font-bold text-gray-800">{s.name}</h2></div>
-              <div className="w-full text-sm text-gray-600 space-y-1"><div className="flex justify-between"><span>학년/반</span><b>{s.grade}학년 {s.classNumber}반</b></div><div className="flex justify-between"><span>중증도</span><b>{s.severity || '-'}순위</b></div></div>
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className="p-8 max-w-7xl mx-auto"><div className="flex justify-between items-center mb-8"><h2 className="text-3xl font-extrabold text-gray-800">학생 관리</h2><UI.Btn onClick={() => setModal({ type: 'add' })} className="bg-gray-800 px-6 rounded-full"><Plus size={20}/> 학생 등록</UI.Btn></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">{students.map(s => (<div key={s.id} onClick={() => setModal({ type: 'edit', data: s })} className={`cursor-pointer rounded-3xl border-4 ${getStudentColor(s.id)} bg-white shadow-lg hover:-translate-y-2 transition-all overflow-hidden`}><div className="p-6 flex flex-col items-center"><div className="w-32 h-32 rounded-full border-4 border-white shadow-md overflow-hidden bg-gray-100 mb-4 flex items-center justify-center"><img src={s.photo} className="w-full h-full object-cover"/></div><div className="px-4 py-1 rounded-full mb-4 bg-white/50 border"><h2 className="text-xl font-bold text-gray-800">{s.name}</h2></div><div className="w-full text-sm text-gray-600 space-y-1"><div className="flex justify-between"><span>학년/반</span><b>{s.grade}학년 {s.classNumber}반</b></div><div className="flex justify-between"><span>중증도</span><b>{s.severity || '-'}순위</b></div></div></div></div>))}</div>
+      {modal?.type==='success' && <UI.Modal onClose={()=>setModal(null)} maxWidth="max-w-sm"><div className="p-8 text-center"><Check size={48} className="text-green-500 mx-auto mb-4"/><h3 className="text-xl font-bold mb-6">저장 완료!</h3><UI.Btn className="w-full bg-green-500" onClick={()=>setModal(null)}>확인</UI.Btn></div></UI.Modal>}
       {modal && modal.type !== 'success' && <StudentModal student={modal.data} onClose={() => setModal(null)} onSave={save} onDelete={(id) => setConfirmModal({ open: true, id })} isEdit={modal.type === 'edit'} />}
-      {modal && modal.type === 'success' && <UI.Modal onClose={() => setModal(null)} maxWidth="max-w-sm"><div className="p-8 text-center"><Check size={48} className="text-green-500 mx-auto mb-4"/><h3 className="text-xl font-bold mb-6">저장 완료!</h3><UI.Btn className="w-full bg-green-500" onClick={() => setModal(null)}>확인</UI.Btn></div></UI.Modal>}
       <ConfirmModal isOpen={confirmModal.open} message="정말 삭제하시겠습니까?" onConfirm={()=>{setStudents(students.filter(s=>s.id!==confirmModal.id)); setConfirmModal({open:false})}} onCancel={()=>setConfirmModal({open:false})} />
     </div>
   );
 }
-
 function StudentModal({ student, onClose, onSave, onDelete, isEdit }) {
   const [form, setForm] = useState(student || { name: '', grade: '1', classNumber: '', severity: '3', teacher: '', extension: '', targetSubjects: [] });
-  const fileRef = useRef();
+  const fRef = useRef();
   const handlePhoto = (e) => { const f = e.target.files[0]; if(f) { const r = new FileReader(); r.onloadend = () => setForm(p => ({...p, photo: r.result})); r.readAsDataURL(f); }};
   const toggleSub = (s) => setForm(p => ({...p, targetSubjects: p.targetSubjects.includes(s) ? p.targetSubjects.filter(i => i !== s) : [...p.targetSubjects, s]}));
-
   return (
     <UI.Modal onClose={onClose} maxWidth="max-w-2xl">
-      <div className="p-6 bg-gray-50 flex flex-col items-center relative">
-        <button onClick={onClose} className="absolute top-4 right-4"><X size={20}/></button>
-        {isEdit && <button onClick={() => onDelete(form.id)} className="absolute top-4 left-4 text-red-500"><Trash2 size={20}/></button>}
-        <div className="relative group w-32 h-32 rounded-full border-4 border-white shadow-lg overflow-hidden bg-white mb-4" onClick={()=>fileRef.current.click()}>
-          <img src={form.photo} className="w-full h-full object-cover"/>
-          <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer"><Camera className="text-white"/></div>
-          <input type="file" ref={fileRef} onChange={handlePhoto} className="hidden" accept="image/*"/>
-        </div>
-        <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="text-3xl font-extrabold bg-transparent text-center outline-none w-40" placeholder="이름" />
-      </div>
+      <div className="p-6 bg-gray-50 flex flex-col items-center relative"><button onClick={onClose} className="absolute top-4 right-4"><X size={20}/></button>{isEdit && <button onClick={() => onDelete(form.id)} className="absolute top-4 left-4 text-red-500"><Trash2 size={20}/></button>}<div className="relative group w-32 h-32 rounded-full border-4 border-white shadow-lg overflow-hidden bg-white mb-4" onClick={()=>fRef.current.click()}><img src={form.photo} className="w-full h-full object-cover"/><div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer"><Camera className="text-white"/></div><input type="file" ref={fRef} onChange={handlePhoto} className="hidden" accept="image/*"/></div><input lang="ko" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="text-3xl font-extrabold bg-transparent text-center outline-none w-40" placeholder="이름" /></div>
       <div className="p-8 h-[50vh] overflow-y-auto custom-scrollbar space-y-6">
-        <div className="grid grid-cols-2 gap-6">
-          <div className="space-y-3">
-            <div className="flex gap-2">
-                <UI.Select label="학년" value={form.grade} onChange={e => setForm({...form, grade: e.target.value})} options={[1,2,3,4,5,6].map(g => ({value: g, label: `${g}학년`}))} />
-                <UI.Input label="반" value={form.classNumber} onChange={e => setForm({...form, classNumber: e.target.value})} />
-            </div>
-            <UI.Input label="중증도 순위 (1~3)" type="number" min="1" max="3" value={form.severity} onChange={e => setForm({...form, severity: e.target.value})} placeholder="숫자만 입력" />
-            <UI.Input label="담임 선생님" value={form.teacher} onChange={e => setForm({...form, teacher: e.target.value})} />
-          </div>
-          <div className="space-y-3">
-            <UI.Input label="생년월일" type="date" value={form.birthDate} onChange={e => setForm({...form, birthDate: e.target.value})} />
-            <UI.Select label="장애 영역" value={form.disabilityType} onChange={e => setForm({...form, disabilityType: e.target.value})} options={['지적장애', '자폐성장애', '시각장애', '청각장애', '지체장애', '발달지체', '정서행동장애', '기타'].map(v => ({value: v, label: v}))} />
-          </div>
-        </div>
-        <div>
-          <h3 className="font-bold text-gray-400 border-b pb-2 mb-2 flex items-center gap-2"><BookOpen size={16}/> 대상 과목</h3>
-          <div className="flex flex-wrap gap-2">{TARGET_SUBJECTS.map(s => <button key={s} onClick={() => toggleSub(s)} className={`px-3 py-1 rounded-full text-sm font-bold transition-all ${form.targetSubjects.includes(s) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{s}</button>)}</div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-            <textarea value={form.dreamCardUsage} onChange={e => setForm({...form, dreamCardUsage: e.target.value})} className="p-3 bg-yellow-50 border-yellow-100 border rounded-xl h-20 text-sm resize-none" placeholder="꿈꾸미 카드 메모" />
-            <textarea value={form.jaramiCardUsage} onChange={e => setForm({...form, jaramiCardUsage: e.target.value})} className="p-3 bg-green-50 border-green-100 border rounded-xl h-20 text-sm resize-none" placeholder="자라미 카드 메모" />
-        </div>
+        <div className="grid grid-cols-2 gap-6"><div className="space-y-3"><div className="flex gap-2"><UI.Select label="학년" value={form.grade} onChange={e => setForm({...form, grade: e.target.value})} options={[1,2,3,4,5,6].map(g => ({value: g, label: `${g}학년`}))} /><UI.Input label="반" value={form.classNumber} onChange={e => setForm({...form, classNumber: e.target.value})} /></div><UI.Input label="중증도 순위 (1~3)" type="number" min="1" max="3" value={form.severity} onChange={e => setForm({...form, severity: e.target.value})} placeholder="숫자만 입력" /><UI.Input label="담임 선생님" value={form.teacher} onChange={e => setForm({...form, teacher: e.target.value})} /></div>
+        <div className="space-y-3"><UI.Input label="생년월일" type="date" value={form.birthDate} onChange={e => setForm({...form, birthDate: e.target.value})} /><UI.Select label="장애 영역" value={form.disabilityType} onChange={e => setForm({...form, disabilityType: e.target.value})} options={['지적장애', '자폐성장애', '시각장애', '청각장애', '지체장애', '발달지체', '정서행동장애', '기타'].map(v => ({value: v, label: v}))} /></div></div>
+        <div><h3 className="font-bold text-gray-400 border-b pb-2 mb-2 flex items-center gap-2"><BookOpen size={16}/> 대상 과목</h3><div className="flex flex-wrap gap-2">{TARGET_SUBJECTS.map(s => <button key={s} onClick={() => toggleSub(s)} className={`px-3 py-1 rounded-full text-sm font-bold transition-all ${form.targetSubjects.includes(s) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{s}</button>)}</div></div>
+        <div className="grid grid-cols-2 gap-4"><textarea lang="ko" value={form.dreamCardUsage} onChange={e => setForm({...form, dreamCardUsage: e.target.value})} className="p-3 bg-yellow-50 border-yellow-100 border rounded-xl h-20 text-sm resize-none" placeholder="꿈꾸미 카드 메모" /><textarea lang="ko" value={form.jaramiCardUsage} onChange={e => setForm({...form, jaramiCardUsage: e.target.value})} className="p-3 bg-green-50 border-green-100 border rounded-xl h-20 text-sm resize-none" placeholder="자라미 카드 메모" /></div>
       </div>
       <div className="p-4 border-t flex justify-end"><UI.Btn onClick={() => onSave(form)} className="px-8 bg-gray-800">저장하기</UI.Btn></div>
     </UI.Modal>
   );
 }
 
-// =================================================================================
 // [7] 인력 관리
-// =================================================================================
-
 function PersonnelManager({ students, staff, setStaff }) {
-  const [recs, setRecs] = usePersistentState('service_records', []); 
-  const [modal, setModal] = useState(null);
-  const [serviceModal, setServiceModal] = useState(null); 
-  const [confirmModal, setConfirmModal] = useState({ open: false, id: null });
-
-  const saveStaff = (d) => {
-      setStaff(modal.mode === 'add' ? [...staff, { ...d, id: Date.now(), role: modal.type==='practical'?'실무사':'사회복무', type: modal.type }] : staff.map(s => s.id === d.id ? { ...s, ...d } : s));
-      setModal(null);
-  };
-  const addRec = (e) => { e.preventDefault(); setRecs([...recs, { id:Date.now(), ...serviceModal, type:e.target.type.value, date:e.target.date.value, desc:e.target.desc.value }]); setServiceModal(null); };
-  
-  const StaffList = ({ type, title, color }) => (
-    <div className="flex-1 flex flex-col">
-      <div className={`p-4 rounded-t-2xl border-b-2 flex justify-between items-center bg-${color}-100 border-${color}-200 text-${color}-800`}>
-        <h3 className="font-extrabold flex gap-2"><Users size={20}/> {title}</h3><button onClick={()=>setModal({ type, mode: 'add', data: {} })} className="bg-white/50 p-2 rounded-full hover:bg-white"><Plus size={18}/></button>
-      </div>
-      <div className="bg-white p-4 rounded-b-2xl shadow-lg border-t-0 space-y-3 min-h-[200px]">
-        {staff.filter(s=>s.type===type).map(s => (
-          <div key={s.id} onClick={() => setModal({ type, mode: 'edit', data: s })} className={`cursor-pointer p-3 rounded-xl border flex justify-between items-center hover:-translate-y-1 transition-transform bg-${color}-50 border-${color}-200`}>
-            <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-sm">👤</div><div><div className="font-bold">{s.name}</div>{s.assignedStudentIds?.length > 0 && <div className="text-[10px] text-gray-500 mt-1">담당: {s.assignedStudentIds.map(id => students.find(s => s.id === id)?.name).join(', ')}</div>}</div></div>
-            <button onClick={(e) => { e.stopPropagation(); setConfirmModal({open: true, id: s.id}); }} className="text-red-400 p-2"><Trash2 size={16}/></button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
+  const [modal, setModal] = useState(null); const [confirmModal, setConfirmModal] = useState({ open: false, id: null });
+  const saveStaff = (d) => { setStaff(modal.mode === 'add' ? [...staff, { ...d, id: Date.now(), role: modal.type==='practical'?'실무사':'사회복무', type: modal.type }] : staff.map(s => s.id === d.id ? { ...s, ...d } : s)); setModal(null); };
+  const StaffList = ({ type, title, color }) => (<div className="flex-1 flex flex-col"><div className={`p-4 rounded-t-2xl border-b-2 flex justify-between items-center bg-${color}-100 border-${color}-200 text-${color}-800`}><h3 className="font-extrabold flex gap-2"><Users size={20}/> {title}</h3><button onClick={()=>setModal({ type, mode: 'add', data: {} })} className="bg-white/50 p-2 rounded-full hover:bg-white"><Plus size={18}/></button></div><div className="bg-white p-4 rounded-b-2xl shadow-lg border-t-0 space-y-3 min-h-[200px]">{staff.filter(s=>s.type===type).map(s => (<div key={s.id} onClick={() => setModal({ type, mode: 'edit', data: s })} className={`cursor-pointer p-3 rounded-xl border flex justify-between items-center hover:-translate-y-1 transition-transform bg-${color}-50 border-${color}-200`}><div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-sm">👤</div><div><div className="font-bold">{s.name}</div>{s.assignedStudentIds?.length > 0 && <div className="text-[10px] text-gray-500 mt-1">담당: {s.assignedStudentIds.map(id => students.find(s => s.id === id)?.name).join(', ')}</div>}</div></div><button onClick={(e) => { e.stopPropagation(); setConfirmModal({open: true, id: s.id}); }} className="text-red-400 p-2"><Trash2 size={16}/></button></div>))}</div></div>);
   return (
-    <div className="p-8 h-full flex flex-col overflow-y-auto">
-      <h2 className="text-3xl font-extrabold text-gray-800 mb-8">지원인력 관리</h2>
-      <div className="flex flex-col md:flex-row gap-6 max-w-6xl mb-8"><StaffList type="practical" title="특수교육 실무사" color="blue"/><StaffList type="social" title="사회복무요원" color="green"/></div>
-      {modal && <UI.Modal onClose={()=>setModal(null)} title={`${modal.type==='practical'?'실무사':'사회복무'} ${modal.mode==='add'?'등록':'수정'}`} maxWidth="max-w-md">
-        <form onSubmit={e=>{e.preventDefault(); saveStaff(modal.data);}} className="p-6">
-            <UI.Input label="이름" value={modal.data.name||''} onChange={e=>setModal({...modal, data:{...modal.data, name:e.target.value}})} required className="mb-6"/>
-            <div className="mb-6"><label className="text-xs font-bold text-gray-400">전담 지원 학생</label><div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">{students.map(s=><div key={s.id} onClick={()=>{const ids=modal.data.assignedStudentIds||[]; setModal({...modal, data:{...modal.data, assignedStudentIds:ids.includes(s.id)?ids.filter(i=>i!==s.id):[...ids,s.id]}})}} className={`p-2 rounded-lg border cursor-pointer flex items-center gap-2 ${modal.data.assignedStudentIds?.includes(s.id)?'bg-blue-50 border-blue-400 text-blue-700':'bg-white'}`}><div className={`w-4 h-4 rounded border flex items-center justify-center ${modal.data.assignedStudentIds?.includes(s.id)?'bg-blue-500 border-blue-500':''}`}>{modal.data.assignedStudentIds?.includes(s.id)&&<Check size={12} className="text-white"/>}</div><span className="text-sm font-bold">{s.name}</span></div>)}</div></div>
-            <div className="flex gap-2"><UI.Btn type="button" variant="secondary" className="flex-1" onClick={()=>setModal(null)}>취소</UI.Btn><UI.Btn type="submit" variant="blue" className="flex-1">저장</UI.Btn></div>
-        </form>
-      </UI.Modal>}
+    <div className="p-8 h-full flex flex-col overflow-y-auto"><h2 className="text-3xl font-extrabold text-gray-800 mb-8">지원인력 관리</h2><div className="flex flex-col md:flex-row gap-6 max-w-6xl mb-8"><StaffList type="practical" title="특수교육 실무사" color="blue"/><StaffList type="social" title="사회복무요원" color="green"/></div>
+      {modal && <UI.Modal onClose={()=>setModal(null)} title={`${modal.type==='practical'?'실무사':'사회복무'} ${modal.mode==='add'?'등록':'수정'}`} maxWidth="max-w-md"><form onSubmit={e=>{e.preventDefault(); saveStaff(modal.data);}} className="p-6"><UI.Input label="이름" value={modal.data.name||''} onChange={e=>setModal({...modal, data:{...modal.data, name:e.target.value}})} required className="mb-6"/><div className="mb-6"><label className="text-xs font-bold text-gray-400">전담 지원 학생</label><div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">{students.map(s=><div key={s.id} onClick={()=>{const ids=modal.data.assignedStudentIds||[]; setModal({...modal, data:{...modal.data, assignedStudentIds:ids.includes(s.id)?ids.filter(i=>i!==s.id):[...ids,s.id]}})}} className={`p-2 rounded-lg border cursor-pointer flex items-center gap-2 ${modal.data.assignedStudentIds?.includes(s.id)?'bg-blue-50 border-blue-400 text-blue-700':'bg-white'}`}><div className={`w-4 h-4 rounded border flex items-center justify-center ${modal.data.assignedStudentIds?.includes(s.id)?'bg-blue-500 border-blue-500':''}`}>{modal.data.assignedStudentIds?.includes(s.id)&&<Check size={12} className="text-white"/>}</div><span className="text-sm font-bold">{s.name}</span></div>)}</div></div><div className="flex gap-2"><UI.Btn type="button" variant="secondary" className="flex-1" onClick={()=>setModal(null)}>취소</UI.Btn><UI.Btn type="submit" variant="blue" className="flex-1">저장</UI.Btn></div></form></UI.Modal>}
       <ConfirmModal isOpen={confirmModal.open} message="삭제하시겠습니까?" onConfirm={()=>{setStaff(staff.filter(x=>x.id!==confirmModal.id)); setConfirmModal({open: false})}} onCancel={() => setConfirmModal({ open: false })} />
     </div>
   );
 }
 
-// =================================================================================
-// [8] 시간표 및 수업 관리 (통계 복구 + 버튼 크기 확대)
-// =================================================================================
-
+// [8] 시간표 관리
 function ScheduleManager({ students, staff }) {
   const [semester, setSemester] = useState(1);
   const [schedule, setSchedule] = usePersistentState('integrated_schedule', {});
-  
-  // 학년별/요일별 상세 시간표 데이터
-  const [gradeTimes, setGradeTimes] = usePersistentState('grade_timetables_detail', (() => {
-    const init = {};
-    [1,2,3,4,5,6].forEach(g => {
-      init[g] = Array(5).fill(null).map(() => Array(6).fill(true));
-    });
-    return init;
-  })());
+  const [gradeTimes, setGradeTimes] = usePersistentState('grade_timetables_detail', (() => { const i = {}; [1,2,3,4,5,6].forEach(g => i[g] = Array(5).fill(null).map(() => Array(6).fill(true))); return i; })());
+  const [logicMode, setLogicMode] = useState('severity'); const [modal, setModal] = useState(null); const [confirmModal, setConfirmModal] = useState({ open: false, type: null }); const [gradeModal, setGradeModal] = useState(false); const [activeGradeTab, setActiveGradeTab] = useState(1);
+  const days = ['월','화','수','목','금']; const periods = [1,2,3,4,5,6];
 
-  const [logicMode, setLogicMode] = useState('severity'); 
-  const [modal, setModal] = useState(null); 
-  const [confirmModal, setConfirmModal] = useState({ open: false, type: null }); 
-  const [gradeModal, setGradeModal] = useState(false);
-  const [activeGradeTab, setActiveGradeTab] = useState(1);
-   
-  const days = ['월','화','수','목','금']; 
-  const periods = [1,2,3,4,5,6];
-
-  // [복구됨] 통계 계산 로직 (Memoization)
   const stats = useMemo(() => {
-    let teacherClasses = 0;
-    const supportCounts = {}; // 인력별 지원 횟수
-    const studentSupportCounts = {}; // 학생별 지원받은 횟수
-
-    // 카운트 초기화
-    staff.forEach(s => supportCounts[s.id] = 0);
-    students.forEach(s => studentSupportCounts[s.id] = 0);
-
-    const currentSch = schedule[semester] || {};
-
-    Object.keys(currentSch).forEach(key => {
-       const slots = currentSch[key] || [];
-       
-       // 1. 특수교사 수업 시수 (type이 'special'인 경우)
-       if (slots.some(item => item.type === 'special')) teacherClasses++;
-       
-       slots.forEach(item => {
-           // 2. 인력 지원 횟수
-           if (item.staffId) {
-               supportCounts[item.staffId] = (supportCounts[item.staffId] || 0) + 1;
-           }
-           // 3. 학생 지원받은 횟수 (특수학급 수업 제외, 순수 지원만 카운트하려면 type check 필요하나, 통상 수업참여도 지원으로 봄)
-           // 여기서는 '지원 인력이 배치된 경우'만 학생 카운트에 포함
-           if (item.staffId) {
-               studentSupportCounts[item.studentId] = (studentSupportCounts[item.studentId] || 0) + 1;
-           }
-       });
+    let teacherClasses = 0; const supportCounts = {}; const studentSupportCounts = {};
+    staff.forEach(s => supportCounts[s.id] = 0); students.forEach(s => studentSupportCounts[s.id] = 0);
+    Object.values(schedule[semester] || {}).forEach(slots => {
+      if (slots.some(i => i.type === 'special')) teacherClasses++;
+      slots.forEach(i => { if (i.staffId) { supportCounts[i.staffId]++; studentSupportCounts[i.studentId]++; }});
     });
-
     return { teacherClasses, supportCounts, studentSupportCounts };
   }, [schedule, semester, staff, students]);
 
-  // 자동 배치 로직
   const autoAssign = () => {
     if(!staff.length) return alert('등록된 인력이 없습니다.');
-    
     const newSch = { ...schedule, [semester]: { ...schedule[semester] } };
-    Object.keys(newSch[semester]).forEach(k => {
-        newSch[semester][k] = (newSch[semester][k] || []).filter(i => i.type === 'special' || i.blocked);
-    });
-
-    const studentCounts = {}; students.forEach(s => studentCounts[s.id] = 0);
-    const staffCounts = {}; staff.forEach(s => staffCounts[s.id] = 0);
-
-    // [로직 1: 중증도 우선]
-    const assignSeverityFirst = (dayIdx, period, k) => {
-        const slots = newSch[semester][k] || [];
-        const busyStudentIds = slots.filter(i => i.type === 'special').map(i => i.studentId);
-        
-        let candidates = students.filter(s => {
-            const isClassTime = gradeTimes[s.grade]?.[dayIdx]?.[period-1];
-            return isClassTime && !busyStudentIds.includes(s.id);
+    Object.keys(newSch[semester]).forEach(k => newSch[semester][k] = (newSch[semester][k] || []).filter(i => i.type === 'special' || i.blocked));
+    const studentCounts = {}; students.forEach(s => studentCounts[s.id] = 0); const staffCounts = {}; staff.forEach(s => staffCounts[s.id] = 0);
+    days.forEach((d, dIdx) => periods.forEach(p => {
+      const k = `${d}-${p}`; if ((newSch[semester][k]||[]).some(i => i.blocked)) return;
+      const slots = newSch[semester][k] || []; const busyS = slots.filter(i => i.type==='special').map(i=>i.studentId); const busySt = new Set(slots.filter(i=>i.staffId).map(i=>i.staffId));
+      let cands = students.filter(s => gradeTimes[s.grade]?.[dIdx]?.[p-1] && !busyS.includes(s.id));
+      if (logicMode === 'severity') {
+        cands.sort((a,b) => a.severity - b.severity).forEach(s => {
+          let st = staff.find(x => x.assignedStudentIds?.includes(s.id));
+          if (st && !busySt.has(st.id)) { busySt.add(st.id); if(!newSch[semester][k]) newSch[semester][k]=[]; newSch[semester][k].push({studentId:s.id, staffId:st.id, type:'support'}); }
+          else if (!st) { st = staff.find(x => !busySt.has(x.id)); if(st){ busySt.add(st.id); if(!newSch[semester][k]) newSch[semester][k]=[]; newSch[semester][k].push({studentId:s.id, staffId:st.id, type:'support'}); } }
         });
-
-        candidates.sort((a, b) => Number(a.severity) - Number(b.severity));
-
-        const busyStaffIds = new Set(slots.filter(i => i.type === 'special' && i.staffId).map(i => i.staffId));
-        const assignments = [];
-
-        candidates.forEach(student => {
-            const dedicatedStaff = staff.find(st => st.assignedStudentIds?.includes(student.id));
-            if (dedicatedStaff && !busyStaffIds.has(dedicatedStaff.id)) {
-                assignments.push({ studentId: student.id, staffId: dedicatedStaff.id, type: 'support' });
-                busyStaffIds.add(dedicatedStaff.id);
-            } else if (!dedicatedStaff) {
-                const freeStaff = staff.find(st => !busyStaffIds.has(st.id));
-                if (freeStaff) {
-                    assignments.push({ studentId: student.id, staffId: freeStaff.id, type: 'support' });
-                    busyStaffIds.add(freeStaff.id);
-                }
-            }
-        });
-        return assignments;
-    };
-
-    // [로직 2: 균등 배정]
-    const assignEqual = (dayIdx, period, k) => {
-        const slots = newSch[semester][k] || [];
-        const busyStudentIds = slots.filter(i => i.type === 'special').map(i => i.studentId);
-        let candidates = students.filter(s => {
-            const isClassTime = gradeTimes[s.grade]?.[dayIdx]?.[period-1];
-            return isClassTime && !busyStudentIds.includes(s.id);
-        });
-
-        candidates.sort((a, b) => studentCounts[a.id] - studentCounts[b.id]);
-        
-        const busyStaffIds = new Set(slots.filter(i => i.type === 'special' && i.staffId).map(i => i.staffId));
-        const assignments = [];
-        const freeStaff = staff.filter(st => !busyStaffIds.has(st.id)).sort((a,b) => staffCounts[a.id] - staffCounts[b.id]);
-
-        while(freeStaff.length > 0 && candidates.length > 0) {
-            const st = freeStaff.shift();
-            const s = candidates.shift();
-            assignments.push({ studentId: s.id, staffId: st.id, type: 'support' });
-            studentCounts[s.id]++;
-            staffCounts[st.id]++;
-        }
-        return assignments;
-    };
-
-    days.forEach((d, dayIdx) => periods.forEach(p => {
-        const k = `${d}-${p}`;
-        if ((newSch[semester][k]||[]).some(i => i.blocked)) return;
-        const newAssigns = logicMode === 'severity' ? assignSeverityFirst(dayIdx, p, k) : assignEqual(dayIdx, p, k);
-        if(!newSch[semester][k]) newSch[semester][k] = [];
-        newSch[semester][k].push(...newAssigns);
+      } else {
+        cands.sort((a,b)=>studentCounts[a.id]-studentCounts[b.id]); const freeSt = staff.filter(x=>!busySt.has(x.id)).sort((a,b)=>staffCounts[a.id]-staffCounts[b.id]);
+        while(freeSt.length && cands.length) { const s=cands.shift(); const st=freeSt.shift(); if(!newSch[semester][k]) newSch[semester][k]=[]; newSch[semester][k].push({studentId:s.id, staffId:st.id, type:'support'}); studentCounts[s.id]++; staffCounts[st.id]++; }
+      }
     }));
-
-    setSchedule(newSch);
-    setConfirmModal({ open: false });
+    setSchedule(newSch); setConfirmModal({ open: false });
   };
-
-  const updateItem = (sid, key, val) => {
-    let type = 'support';
-    if (key === 'subject') type = 'special'; 
-    let newData = modal.data.filter(i => i.studentId !== sid);
-    if (val) newData.push({ studentId: sid, [key]: val, type: type, [key==='subject'?'supportId':'subject']: null });
-    setModal({ ...modal, data: newData });
-  };
-
-  const toggleBlock = () => {
-      const isBlocked = modal.data.some(i => i.blocked);
-      setModal({ ...modal, data: isBlocked ? modal.data.filter(i => !i.blocked) : [...modal.data, { blocked: true }] });
-  };
-
-  const toggleGradeTime = (dayIdx, periodIdx) => {
-    const newTimes = { ...gradeTimes };
-    const dayTimes = [...newTimes[activeGradeTab][dayIdx]];
-    dayTimes[periodIdx] = !dayTimes[periodIdx];
-    newTimes[activeGradeTab][dayIdx] = dayTimes;
-    setGradeTimes(newTimes);
-  };
+  const toggleGradeTime = (d, p) => { const n = { ...gradeTimes }; n[activeGradeTab][d][p] = !n[activeGradeTab][d][p]; setGradeTimes(n); };
 
   return (
     <div className="p-8 h-full flex flex-col">
-      <header className="flex flex-col gap-6 mb-6 shrink-0">
-        <div className="flex justify-between items-center">
-          <div><h2 className="text-3xl font-extrabold text-gray-800">통합 시간표</h2></div>
-          <div className="flex gap-2">
-             <button onClick={() => setGradeModal(true)} className="px-4 py-2 bg-white border rounded-xl font-bold hover:bg-gray-50 flex items-center gap-2"><Clock size={18}/> 학년별 시수 설정</button>
-             <div className="bg-gray-100 p-1 rounded-xl flex">
-                 <button onClick={()=>setLogicMode('severity')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${logicMode==='severity'?'bg-white shadow text-pink-600':'text-gray-400'}`}>중증도 우선</button>
-                 <button onClick={()=>setLogicMode('equal')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${logicMode==='equal'?'bg-white shadow text-blue-600':'text-gray-400'}`}>균등 배정</button>
-             </div>
-             <button onClick={() => setConfirmModal({ open: true, type: 'auto' })} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-xl font-bold shadow-md hover:scale-105 transition-transform"><Wand2 size={18}/> 자동 배치</button>
-             <button onClick={() => setConfirmModal({ open: true, type: 'reset' })} className="bg-gray-100 p-2 rounded-xl text-gray-500 hover:text-red-500"><RotateCcw size={20}/></button>
-          </div>
-        </div>
-
-        {/* [복구됨] 통계 바 UI */}
-        <div className="bg-gray-800 text-white rounded-2xl p-4 flex flex-wrap items-center shadow-lg gap-4">
-           {/* 1. 특수교사 수업 시수 */}
-           <div className="flex items-center gap-3 px-2 pr-6 border-r border-gray-600">
-              <div className="bg-pink-500 p-2 rounded-lg"><GraduationCap size={20}/></div>
-              <div><p className="text-xs text-gray-400 font-bold">주간 수업</p><p className="text-xl font-bold">{stats.teacherClasses}시간</p></div>
-           </div>
-           
-           {/* 2. 지원 인력 통계 */}
-           <div className="flex gap-4 overflow-x-auto custom-scrollbar items-center px-2">
-              {staff.map(s => (
-                <div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap">
-                   <div className={`w-2 h-2 rounded-full ${s.type==='practical'?'bg-blue-400':'bg-green-400'}`}/>
-                   <div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.supportCounts[s.id] || 0}회</p></div>
-                </div>
-              ))}
-           </div>
-
-           <div className="w-px h-8 bg-gray-600 mx-2"></div>
-
-           {/* 3. 학생 지원 통계 */}
-           <div className="flex gap-4 overflow-x-auto custom-scrollbar items-center flex-1">
-              {students.map(s => (
-                <div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap">
-                   <div className="w-2 h-2 rounded-full bg-yellow-400"/>
-                   <div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.studentSupportCounts[s.id] || 0}회</p></div>
-                </div>
-              ))}
-           </div>
-        </div>
-      </header>
-      
-      {/* 시간표 격자 */}
-      <div className="flex-1 bg-white p-4 rounded-[2rem] shadow-xl overflow-hidden flex flex-col">
-        <div className="grid grid-cols-6 gap-2 mb-2 text-center h-12 shrink-0"><div className="font-bold text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center">교시</div>{days.map(d=><div key={d} className="font-extrabold text-lg text-gray-700 bg-gray-100 rounded-xl flex items-center justify-center">{d}</div>)}</div>
-        <div className="flex-1 grid grid-rows-6 gap-2">{periods.map(p => <div key={p} className="grid grid-cols-6 gap-2"><div className="font-bold text-xl text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center">{p}</div>{days.map(d => {
-          const items = schedule[semester]?.[`${d}-${p}`] || [];
-          const isBlocked = items.some(i => i.blocked);
-          return (
-            <div key={d} onClick={()=>setModal({ day: d, period: p, data: JSON.parse(JSON.stringify(items)) })} className={`bg-white border-2 rounded-xl hover:border-pink-300 hover:shadow-lg cursor-pointer p-1 overflow-hidden relative group transition-all ${isBlocked ? 'border-gray-200 bg-gray-50' : 'border-gray-100'}`}>
-                {isBlocked ? <div className="w-full h-full flex items-center justify-center"><X className="text-gray-300" size={32} /></div> : (
-                    <div className="flex flex-wrap gap-1 justify-center content-start h-full">
-                        {items.map((i,x)=>{
-                            const s = students.find(s=>s.id===i.studentId); const st = staff.find(s=>s.id===i.staffId); 
-                            if(!s) return null;
-                            const isSpecial = i.type === 'special';
-                            return <div key={x} className={`flex flex-col items-center text-[9px] px-1.5 py-0.5 rounded-md shadow-sm whitespace-nowrap ${getStudentColor(s.id)} ${isSpecial ? 'border-4 border-gray-700 font-extrabold ring-1 ring-white' : 'opacity-90 font-bold'}`}><span>{s.name}</span><span className="opacity-80 scale-90">{isSpecial ? (i.subject || '특수') : (st ? st.name : '?')}</span></div>
-                        })}
-                    </div>
-                )}
-            </div>
-          );
-        })}</div>)}</div>
-      </div>
-      
-      {/* 상세 설정 모달 (버튼 크기 확대) */}
+      <header className="flex flex-col gap-6 mb-6 shrink-0"><div className="flex justify-between items-center"><div><h2 className="text-3xl font-extrabold text-gray-800">통합 시간표</h2></div><div className="flex gap-2"><button onClick={() => setGradeModal(true)} className="px-4 py-2 bg-white border rounded-xl font-bold hover:bg-gray-50 flex items-center gap-2"><Clock size={18}/> 학년별 시수 설정</button><div className="bg-gray-100 p-1 rounded-xl flex"><button onClick={()=>setLogicMode('severity')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${logicMode==='severity'?'bg-white shadow text-pink-600':'text-gray-400'}`}>중증도 우선</button><button onClick={()=>setLogicMode('equal')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${logicMode==='equal'?'bg-white shadow text-blue-600':'text-gray-400'}`}>균등 배정</button></div><button onClick={() => setConfirmModal({ open: true, type: 'auto' })} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-xl font-bold shadow-md hover:scale-105 transition-transform"><Wand2 size={18}/> 자동 배치</button><button onClick={() => setConfirmModal({ open: true, type: 'reset' })} className="bg-gray-100 p-2 rounded-xl text-gray-500 hover:text-red-500"><RotateCcw size={20}/></button></div></div>
+        <div className="bg-gray-800 text-white rounded-2xl p-4 flex flex-wrap items-center shadow-lg gap-4"><div className="flex items-center gap-3 px-2 pr-6 border-r border-gray-600"><div className="bg-pink-500 p-2 rounded-lg"><GraduationCap size={20}/></div><div><p className="text-xs text-gray-400 font-bold">주간 수업</p><p className="text-xl font-bold">{stats.teacherClasses}시간</p></div></div><div className="flex gap-4 overflow-x-auto custom-scrollbar items-center px-2">{staff.map(s => (<div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap"><div className={`w-2 h-2 rounded-full ${s.type==='practical'?'bg-blue-400':'bg-green-400'}`}/><div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.supportCounts[s.id] || 0}회</p></div></div>))}</div><div className="w-px h-8 bg-gray-600 mx-2"></div><div className="flex gap-4 overflow-x-auto custom-scrollbar items-center flex-1">{students.map(s => (<div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap"><div className="w-2 h-2 rounded-full bg-yellow-400"/><div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.studentSupportCounts[s.id] || 0}회</p></div></div>))}</div></div></header>
+      <div className="flex-1 bg-white p-4 rounded-[2rem] shadow-xl overflow-hidden flex flex-col"><div className="grid grid-cols-6 gap-2 mb-2 text-center h-12 shrink-0"><div className="font-bold text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center">교시</div>{days.map(d=><div key={d} className="font-extrabold text-lg text-gray-700 bg-gray-100 rounded-xl flex items-center justify-center">{d}</div>)}</div><div className="flex-1 grid grid-rows-6 gap-2">{periods.map(p => <div key={p} className="grid grid-cols-6 gap-2"><div className="font-bold text-xl text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center">{p}</div>{days.map(d => { const items = schedule[semester]?.[`${d}-${p}`] || []; const isBlocked = items.some(i => i.blocked); return (<div key={d} onClick={()=>setModal({ day: d, period: p, data: JSON.parse(JSON.stringify(items)) })} className={`bg-white border-2 rounded-xl hover:border-pink-300 hover:shadow-lg cursor-pointer p-1 overflow-hidden relative group transition-all ${isBlocked ? 'border-gray-200 bg-gray-50' : 'border-gray-100'}`}>{isBlocked ? <div className="w-full h-full flex items-center justify-center"><X className="text-gray-300" size={32} /></div> : (<div className="flex flex-wrap gap-1 justify-center content-start h-full">{items.map((i,x)=>{ const s = students.find(s=>s.id===i.studentId); const st = staff.find(s=>s.id===i.staffId); if(!s) return null; const isSpecial = i.type === 'special'; return <div key={x} className={`flex flex-col items-center text-[9px] px-1.5 py-0.5 rounded-md shadow-sm whitespace-nowrap ${getStudentColor(s.id)} ${isSpecial ? 'border-4 border-gray-700 font-extrabold ring-1 ring-white' : 'opacity-90 font-bold'}`}><span>{s.name}</span><span className="opacity-80 scale-90">{isSpecial ? (i.subject || '특수') : (st ? st.name : '?')}</span></div> })}</div>)}</div>); })}</div>)}</div></div>
       {modal && <UI.Modal onClose={()=>setModal(null)} maxWidth="max-w-5xl" title={`${modal.day}요일 ${modal.period}교시 설정`}>
-        <div className="flex justify-between items-center px-6 py-2 bg-gray-50 border-b"><span className="text-sm text-gray-500 font-bold">개별 설정</span><button onClick={toggleBlock} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-sm ${modal.data.some(i=>i.blocked) ? 'bg-red-500 text-white' : 'bg-white border'}`}>{modal.data.some(i=>i.blocked) ? '금지 해제' : '배정 금지'}</button></div>
+        <div className="flex justify-between items-center px-6 py-2 bg-gray-50 border-b"><span className="text-sm text-gray-500 font-bold">개별 설정</span><button onClick={()=>{const b=modal.data.some(i=>i.blocked); setModal({...modal, data: b?modal.data.filter(i=>!i.blocked):[...modal.data,{blocked:true}]})}} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-sm ${modal.data.some(i=>i.blocked) ? 'bg-red-500 text-white' : 'bg-white border'}`}>{modal.data.some(i=>i.blocked) ? '금지 해제' : '배정 금지'}</button></div>
         <div className={`flex-1 overflow-y-auto custom-scrollbar p-6 grid grid-cols-1 md:grid-cols-2 gap-4 ${modal.data.some(i=>i.blocked) ? 'opacity-50 pointer-events-none' : ''}`}>
-          {students.map(s => {
-            const entry = modal.data.find(i=>i.studentId===s.id);
-            return (
-              <div key={s.id} className={`p-4 rounded-2xl border-2 transition-all ${entry ? (entry.type==='special' ? 'border-gray-600 bg-gray-50 ring-2 ring-pink-100' : 'border-blue-400 bg-blue-50') : 'border-gray-100 bg-white'}`}>
-                <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-3"><img src={s.photo} className="w-10 h-10 rounded-full border bg-white"/><span className="font-bold">{s.name} <span className="text-xs font-normal text-gray-500">{s.grade}학년 / {s.severity}순위</span></span></div></div>
-                <div className="space-y-2">
-                  <div><span className="text-[10px] font-bold text-gray-400">특수학급 수업 (직접입력)</span> <div className="flex flex-wrap gap-1">{s.targetSubjects?.map(subj=><button key={subj} onClick={()=>updateItem(s.id, 'subject', entry?.subject===subj?null:subj)} className={`px-2 py-1 rounded text-xs font-bold border ${entry?.subject===subj?'bg-gray-800 text-white':'bg-white text-gray-600'}`}>{subj}</button>)}</div></div>
-                  <div><span className="text-[10px] font-bold text-gray-400">원반 지원 인력</span> <div className="flex flex-wrap gap-1">{staff.map(st=><button key={st.id} onClick={()=>updateItem(s.id, 'staffId', entry?.staffId===st.id?null:st.id)} className={`px-2 py-1 rounded text-xs font-bold border ${entry?.staffId===st.id?'bg-blue-600 text-white':'bg-white text-blue-600'}`}>{st.name}</button>)}</div></div>
-                </div>
-              </div>
-            )
-          })}
+          {students.map(s => { const entry = modal.data.find(i=>i.studentId===s.id); return (<div key={s.id} className={`p-4 rounded-2xl border-2 transition-all ${entry ? (entry.type==='special' ? 'border-gray-600 bg-gray-50 ring-2 ring-pink-100' : 'border-blue-400 bg-blue-50') : 'border-gray-100 bg-white'}`}><div className="flex items-center justify-between mb-3"><div className="flex items-center gap-3"><img src={s.photo} className="w-10 h-10 rounded-full border bg-white"/><span className="font-bold">{s.name} <span className="text-xs font-normal text-gray-500">{s.grade}학년 / {s.severity}순위</span></span></div></div><div className="space-y-2"><div><span className="text-[10px] font-bold text-gray-400">특수학급 수업 (직접입력)</span> <div className="flex flex-wrap gap-1">{s.targetSubjects?.map(subj=><button key={subj} onClick={()=>{let n=modal.data.filter(i=>i.studentId!==s.id); if(entry?.subject!==subj) n.push({studentId:s.id, subject:subj, type:'special'}); setModal({...modal, data:n})}} className={`px-2 py-1 rounded text-xs font-bold border ${entry?.subject===subj?'bg-gray-800 text-white':'bg-white text-gray-600'}`}>{subj}</button>)}</div></div><div><span className="text-[10px] font-bold text-gray-400">원반 지원 인력</span> <div className="flex flex-wrap gap-1">{staff.map(st=><button key={st.id} onClick={()=>{let n=modal.data.filter(i=>i.studentId!==s.id); if(entry?.staffId!==st.id) n.push({studentId:s.id, staffId:st.id, type:'support'}); setModal({...modal, data:n})}} className={`px-2 py-1 rounded text-xs font-bold border ${entry?.staffId===st.id?'bg-blue-600 text-white':'bg-white text-blue-600'}`}>{st.name}</button>)}</div></div></div></div>) })}
         </div>
-        {/* [수정] 버튼 크기 확대 (flex-1 적용) */}
-        <div className="p-4 border-t flex gap-3">
-            <UI.Btn variant="secondary" onClick={()=>setModal(null)} className="flex-1 py-4 text-lg">취소</UI.Btn>
-            <UI.Btn className="bg-gray-800 flex-1 py-4 text-lg" onClick={()=>{setSchedule({...schedule, [semester]: {...schedule[semester], [`${modal.day}-${modal.period}`]: modal.data}}); setModal(null)}}>저장</UI.Btn>
-        </div>
+        <div className="p-4 border-t flex gap-3"><UI.Btn variant="secondary" onClick={()=>setModal(null)} className="flex-1 py-4 text-lg">취소</UI.Btn><UI.Btn className="bg-gray-800 flex-1 py-4 text-lg" onClick={()=>{setSchedule({...schedule, [semester]: {...schedule[semester], [`${modal.day}-${modal.period}`]: modal.data}}); setModal(null)}}>저장</UI.Btn></div>
       </UI.Modal>}
-      
-      {/* 학년별 시수 설정 모달 */}
-      {gradeModal && <UI.Modal onClose={()=>setGradeModal(false)} title="학년별 수업/하교 설정" maxWidth="max-w-2xl">
-          <div className="p-6">
-              <div className="flex gap-2 mb-6 border-b">
-                  {[1,2,3,4,5,6].map(g => (
-                      <button key={g} onClick={() => setActiveGradeTab(g)} className={`px-6 py-3 font-bold rounded-t-xl transition-all ${activeGradeTab === g ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>{g}학년</button>
-                  ))}
-              </div>
-              <div className="bg-gray-50 rounded-2xl p-4">
-                  <div className="grid grid-cols-6 gap-2 mb-2 text-center text-sm font-bold text-gray-500"><div>교시</div>{days.map(d => <div key={d}>{d}요일</div>)}</div>
-                  {[0,1,2,3,4,5].map((periodIdx) => ( 
-                      <div key={periodIdx} className="grid grid-cols-6 gap-2 mb-2 items-center">
-                          <div className="font-bold text-center text-gray-400">{periodIdx + 1}교시</div>
-                          {[0,1,2,3,4].map((dayIdx) => { 
-                              const isActive = gradeTimes[activeGradeTab]?.[dayIdx]?.[periodIdx];
-                              return <div key={dayIdx} onClick={() => toggleGradeTime(dayIdx, periodIdx)} className={`h-10 rounded-lg cursor-pointer flex items-center justify-center border transition-all text-xs font-bold ${isActive ? 'bg-green-500 border-green-600 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-300'}`}>{isActive ? '수업' : '하교'}</div>;
-                          })}
-                      </div>
-                  ))}
-              </div>
-              <div className="mt-6 flex justify-end"><UI.Btn className="bg-gray-800 px-8" onClick={()=>setGradeModal(false)}>설정 완료</UI.Btn></div>
-          </div>
-      </UI.Modal>}
-
+      {gradeModal && <UI.Modal onClose={()=>setGradeModal(false)} title="학년별 수업/하교 설정" maxWidth="max-w-2xl"><div className="p-6"><div className="flex gap-2 mb-6 border-b">{[1,2,3,4,5,6].map(g => (<button key={g} onClick={() => setActiveGradeTab(g)} className={`px-6 py-3 font-bold rounded-t-xl transition-all ${activeGradeTab === g ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>{g}학년</button>))}</div><div className="bg-gray-50 rounded-2xl p-4"><div className="grid grid-cols-6 gap-2 mb-2 text-center text-sm font-bold text-gray-500"><div>교시</div>{days.map(d => <div key={d}>{d}요일</div>)}</div>{[0,1,2,3,4,5].map((pIdx) => (<div key={pIdx} className="grid grid-cols-6 gap-2 mb-2 items-center"><div className="font-bold text-center text-gray-400">{pIdx + 1}교시</div>{[0,1,2,3,4].map((dIdx) => { const a = gradeTimes[activeGradeTab]?.[dIdx]?.[pIdx]; return <div key={dIdx} onClick={() => toggleGradeTime(dIdx, pIdx)} className={`h-10 rounded-lg cursor-pointer flex items-center justify-center border transition-all text-xs font-bold ${a ? 'bg-green-500 border-green-600 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-300'}`}>{a ? '수업' : '하교'}</div>; })}</div>))}</div><div className="mt-6 flex justify-end"><UI.Btn className="bg-gray-800 px-8" onClick={()=>setGradeModal(false)}>설정 완료</UI.Btn></div></div></UI.Modal>}
       <ConfirmModal isOpen={confirmModal.open} message={confirmModal.type === 'reset' ? "시간표를 초기화하시겠습니까?" : `[${logicMode==='severity'?'중증도 우선':'균등 배정'}] 로직으로 자동 배치하시겠습니까? (기존 지원 내역은 재작성됩니다)`} onConfirm={confirmModal.type === 'reset' ? () => {setSchedule({...schedule, [semester]:{}}); setConfirmModal({open:false});} : autoAssign} onCancel={() => setConfirmModal({ open: false, type: null })} />
     </div>
   );
 }
-// =================================================================================
-// [9] 예산 관리 (시트 연동 버그 수정됨)
-// =================================================================================
 
+// [9] 예산 관리
 function BudgetManager() {
-  // ★★★ 구글 앱스 스크립트 웹앱 URL을 꼭 넣어주세요! ★★★
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwPGP3XD0UiXgBirn2vu9N0lzD_-0wOrJJuVaiA5MhSoHylwoYrEzH8G_Xu_5nHTjpo/exec"; 
-  
-  const [items, setItems] = useState([]); 
-  const [budgets, setBudgets] = usePersistentState('budget_definitions', [{ id: 'default', name: '학급운영비', total: 300000 }]); 
-  const [activeTab, setActiveTab] = useState(budgets[0]?.name || '');
-  const [loading, setLoading] = useState(false);
-  
-  // 모달 상태
-  const [modal, setModal] = useState(null); 
-  const [confirm, setConfirm] = useState(null); 
-
+  const [items, setItems] = useState([]); const [budgets, setBudgets] = usePersistentState('budget_definitions', [{ id: 'default', name: '학급운영비', total: 300000 }]);
+  const [activeTab, setActiveTab] = useState(budgets[0]?.name || ''); const [loading, setLoading] = useState(false);
+  const [modal, setModal] = useState(null); const [confirm, setConfirm] = useState(null);
   useEffect(() => { if (budgets.length > 0 && !budgets.find(b => b.name === activeTab)) setActiveTab(budgets[0].name); }, [budgets, activeTab]);
-
   const stats = useMemo(() => {
-    const currentBudget = budgets.find(b => b.name === activeTab);
-    const totalLimit = currentBudget ? Number(currentBudget.total) : 0;
-    const currentItems = items.filter(i => i.category === activeTab);
-    const totalExpense = currentItems.reduce((acc, cur) => acc + Number(cur.amount), 0);
-    return { total: totalLimit, used: totalExpense, remain: totalLimit - totalExpense };
+    const b = budgets.find(b => b.name === activeTab); const total = b ? Number(b.total) : 0;
+    const used = items.filter(i => i.category === activeTab).reduce((acc, cur) => acc + Number(cur.amount), 0);
+    return { total, used, remain: total - used };
   }, [items, budgets, activeTab]);
-
-  const fetchData = async () => {
-    if(!GAS_URL || GAS_URL.includes("여기에")) return;
-    setLoading(true);
-    try { 
-      const res = await fetch(GAS_URL); 
-      const data = await res.json(); 
-      // 예산 데이터만 필터링해서 가져오거나, 전체에서 budget 키 확인 (GAS 코드에 따라 다름)
-      // 현재 GAS 코드는 { budget: [], iep: [], ... } 형태이므로:
-      setItems(data.budget || []); 
-    } catch (err) { console.error("Load Error"); } 
-    finally { setLoading(false); }
+  const fetchData = async () => { setLoading(true); const data = await callGAS(GAS_URL); if(data) setItems(data.budget || []); setLoading(false); };
+  const saveItem = async (form) => {
+    setLoading(true); const newItem = form.id ? form : { ...form, id: Date.now() };
+    if (form.id) setItems(items.map(i => i.id === form.id ? newItem : i)); else setItems([newItem, ...items]); setModal(null);
+    await callGAS(GAS_URL, { type: 'budget', ...newItem }); setLoading(false);
   };
-
-  // [수정됨] 저장 시 type: 'budget' 명시
-  const saveItem = async (formData) => {
-    setLoading(true);
-    const newItem = formData.id ? formData : { ...formData, id: Date.now() };
-    if (formData.id) setItems(items.map(i => i.id === formData.id ? newItem : i)); else setItems([newItem, ...items]);
-    setModal(null);
-    try { 
-      await fetch(GAS_URL, { 
-        method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ type: 'budget', ...newItem }) // ★ type 추가
-      }); 
-    } catch (err) { alert("저장 오류"); } 
-    finally { setLoading(false); }
-  };
-
-  // [수정됨] 삭제 시 type: 'budget' 명시
   const executeDelete = async () => {
-    if (!confirm) return;
     if (confirm.type === 'item') {
-      const targetId = confirm.data.id; 
-      setLoading(true); 
-      setItems(items.filter(i => i.id !== targetId)); 
-      setConfirm(null);
-      try { 
-        await fetch(GAS_URL, { 
-          method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" }, 
-          body: JSON.stringify({ type: 'budget', action: 'delete', id: targetId }) // ★ type 추가
-        }); 
-      } catch (err) { alert("삭제 오류"); } 
-      finally { setLoading(false); }
-    } else if (confirm.type === 'budget') {
-      const newBudgets = budgets.filter(b => b.name !== activeTab); 
-      setBudgets(newBudgets); 
-      setActiveTab(newBudgets[0].name); 
-      setConfirm(null);
-    }
+      const id = confirm.data.id; setLoading(true); setItems(items.filter(i => i.id !== id)); setConfirm(null);
+      await callGAS(GAS_URL, { type: 'budget', action: 'delete', id }); setLoading(false);
+    } else if (confirm.type === 'budget') { const nb = budgets.filter(b => b.name !== activeTab); setBudgets(nb); setActiveTab(nb[0].name); setConfirm(null); }
   };
-
-  const saveBudget = (newBudget) => { if (budgets.some(b => b.name === newBudget.name)) return alert("중복된 이름"); setBudgets([...budgets, { ...newBudget, id: Date.now() }]); setActiveTab(newBudget.name); setModal(null); };
-
+  const saveBudget = (nb) => { if (budgets.some(b => b.name === nb.name)) return alert("중복된 이름"); setBudgets([...budgets, { ...nb, id: Date.now() }]); setActiveTab(nb.name); setModal(null); };
   useEffect(() => { fetchData(); }, []);
-  const fmt = (n) => new Intl.NumberFormat('ko-KR').format(n);
-  const filteredItems = items.filter(i => i.category === activeTab);
+  const fmt = (n) => new Intl.NumberFormat('ko-KR').format(n); const filtered = items.filter(i => i.category === activeTab);
 
   return (
-    <div className="p-8 h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-3xl font-extrabold text-gray-800">학급 예산 관리</h2>
-        <div className="flex gap-2">
-          <button onClick={() => setModal('add_budget')} className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100 transition-colors"><Plus size={18}/> 예산 항목 추가</button>
-          <button onClick={fetchData} className={`p-2.5 rounded-full bg-white border shadow hover:bg-gray-50 ${loading ? 'animate-spin' : ''}`}><RefreshCcw size={20} className="text-gray-600"/></button>
-        </div>
-      </div>
-      <div className="flex justify-between items-end border-b mb-6">
-        <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2 max-w-[80%]">{budgets.map(b => (<button key={b.id} onClick={() => setActiveTab(b.name)} className={`px-5 py-2 rounded-t-2xl text-sm font-bold whitespace-nowrap transition-all border-b-0 ${activeTab === b.name ? 'bg-gray-800 text-white shadow-lg translate-y-[1px]' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{b.name}</button>))}</div>
-        <button onClick={()=>{if(budgets.length<=1)return alert('최소 1개 유지'); setConfirm({type:'budget', data:activeTab})}} className="mb-2 text-xs text-red-400 hover:text-red-600 font-bold flex items-center gap-1 px-3 py-1 bg-red-50 rounded-lg"><Trash2 size={12}/> 현재 예산 삭제</button>
-      </div>
-      {activeTab && (
-        <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 mb-6 flex flex-col md:flex-row justify-between items-center gap-6">
-            <div className="flex items-center gap-4 w-full md:w-auto"><div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl bg-pink-100 text-pink-600">📂</div><div><div className="text-sm text-gray-400 font-bold mb-1">{activeTab} 잔액</div><div className={`text-3xl font-extrabold ${stats.remain < 0 ? 'text-red-500' : 'text-gray-800'}`}>{fmt(stats.remain)}원</div></div></div>
-            <div className="flex gap-8 w-full md:w-auto bg-gray-50 p-4 rounded-2xl justify-around"><div><div className="text-xs text-gray-400 font-bold">배정 예산</div><div className="text-lg font-bold text-blue-600">{fmt(stats.total)}</div></div><div className="w-px bg-gray-200"></div><div><div className="text-xs text-gray-400 font-bold">현재 사용액</div><div className="text-lg font-bold text-red-500">{fmt(stats.used)}</div></div></div>
-        </div>
-      )}
-      <div className="flex-1 bg-white rounded-[2rem] shadow border overflow-hidden flex flex-col">
-        <div className="p-4 bg-gray-50 border-b flex font-bold text-gray-500 text-xs text-center"><div className="w-24">날짜</div><div className="w-24">사용처</div><div className="flex-1 text-left pl-4">내역</div><div className="w-24 text-right pr-4">금액</div><div className="w-16">관리</div></div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          {filteredItems.length > 0 ? filteredItems.map(item => (
-            <div key={item.id} className="flex items-center p-4 border-b hover:bg-gray-50 transition-colors text-sm"><div className="w-24 text-center text-gray-500 text-xs">{item.date}</div><div className="w-24 text-center"><span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-md text-xs font-bold truncate block">{item.vendor}</span></div><div className="flex-1 text-left pl-4 font-bold text-gray-700">{item.item}{item.memo && <span className="text-xs text-gray-400 font-normal ml-2">- {item.memo}</span>}</div><div className="w-24 text-right pr-4 font-bold text-red-500">-{fmt(item.amount)}</div><div className="w-16 flex justify-center gap-2"><button onClick={() => setModal({ type: 'item', data: item })} className="text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button><button onClick={() => setConfirm({type:'item', data:item})} className="text-gray-400 hover:text-red-500"><Trash2 size={16}/></button></div></div>
-          )) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-50"><Coins size={48} className="mb-4"/><p>지출 내역이 없습니다.</p></div>}
-        </div>
-      </div>
+    <div className="p-8 h-full flex flex-col"><div className="flex justify-between items-center mb-6"><h2 className="text-3xl font-extrabold text-gray-800">학급 예산 관리</h2><div className="flex gap-2"><button onClick={() => setModal('add_budget')} className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100 transition-colors"><Plus size={18}/> 예산 항목 추가</button><button onClick={fetchData} className={`p-2.5 rounded-full bg-white border shadow hover:bg-gray-50 ${loading ? 'animate-spin' : ''}`}><RefreshCcw size={20} className="text-gray-600"/></button></div></div>
+      <div className="flex justify-between items-end border-b mb-6"><div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2 max-w-[80%]">{budgets.map(b => (<button key={b.id} onClick={() => setActiveTab(b.name)} className={`px-5 py-2 rounded-t-2xl text-sm font-bold whitespace-nowrap transition-all border-b-0 ${activeTab === b.name ? 'bg-gray-800 text-white shadow-lg translate-y-[1px]' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{b.name}</button>))}</div><button onClick={()=>{if(budgets.length<=1)return alert('최소 1개 유지'); setConfirm({type:'budget', data:activeTab})}} className="mb-2 text-xs text-red-400 hover:text-red-600 font-bold flex items-center gap-1 px-3 py-1 bg-red-50 rounded-lg"><Trash2 size={12}/> 현재 예산 삭제</button></div>
+      {activeTab && (<div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 mb-6 flex flex-col md:flex-row justify-between items-center gap-6"><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl bg-pink-100 text-pink-600">📂</div><div><div className="text-sm text-gray-400 font-bold mb-1">{activeTab} 잔액</div><div className={`text-3xl font-extrabold ${stats.remain < 0 ? 'text-red-500' : 'text-gray-800'}`}>{fmt(stats.remain)}원</div></div></div><div className="flex gap-8 w-full md:w-auto bg-gray-50 p-4 rounded-2xl justify-around"><div><div className="text-xs text-gray-400 font-bold">배정 예산</div><div className="text-lg font-bold text-blue-600">{fmt(stats.total)}</div></div><div className="w-px bg-gray-200"></div><div><div className="text-xs text-gray-400 font-bold">현재 사용액</div><div className="text-lg font-bold text-red-500">{fmt(stats.used)}</div></div></div></div>)}
+      <div className="flex-1 bg-white rounded-[2rem] shadow border overflow-hidden flex flex-col"><div className="p-4 bg-gray-50 border-b flex font-bold text-gray-500 text-xs text-center"><div className="w-24">날짜</div><div className="w-24">사용처</div><div className="flex-1 text-left pl-4">내역</div><div className="w-24 text-right pr-4">금액</div><div className="w-16">관리</div></div><div className="flex-1 overflow-y-auto custom-scrollbar">{filtered.length > 0 ? filtered.map(item => (<div key={item.id} className="flex items-center p-4 border-b hover:bg-gray-50 transition-colors text-sm"><div className="w-24 text-center text-gray-500 text-xs">{item.date}</div><div className="w-24 text-center"><span className="px-2 py-1 bg-blue-50 text-blue-600 rounded-md text-xs font-bold truncate block">{item.vendor}</span></div><div className="flex-1 text-left pl-4 font-bold text-gray-700">{item.item}{item.memo && <span className="text-xs text-gray-400 font-normal ml-2">- {item.memo}</span>}</div><div className="w-24 text-right pr-4 font-bold text-red-500">-{fmt(item.amount)}</div><div className="w-16 flex justify-center gap-2"><button onClick={() => setModal({ type: 'item', data: item })} className="text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button><button onClick={() => setConfirm({type:'item', data:item})} className="text-gray-400 hover:text-red-500"><Trash2 size={16}/></button></div></div>)) : <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-50"><Coins size={48} className="mb-4"/><p>지출 내역이 없습니다.</p></div>}</div></div>
       {activeTab && <button onClick={() => setModal({ type: 'item', data: null })} className="fixed bottom-8 right-8 w-16 h-16 bg-gray-800 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-transform z-20"><Edit2 size={28}/></button>}
       {modal === 'add_budget' && <UI.Modal onClose={() => setModal(null)} title="새 예산 항목 추가" maxWidth="max-w-sm"><BudgetDefForm onSave={saveBudget} onClose={() => setModal(null)} /></UI.Modal>}
       {modal?.type === 'item' && <UI.Modal onClose={() => setModal(null)} title={modal.data ? "수정" : "기록"} maxWidth="max-w-sm"><BudgetForm activeTab={activeTab} initialData={modal.data} onSave={saveItem} onClose={() => setModal(null)} /></UI.Modal>}
@@ -790,463 +509,228 @@ function BudgetManager() {
     </div>
   );
 }
-// =================================================================================
-// [10] 개별화 교육(IEP) 관리 (Google Gemini 적용 버전)
-// =================================================================================
+function BudgetDefForm({ onSave, onClose }) {
+  const [form, setForm] = useState({ name: '', total: '' });
+  return <div className="p-6"><UI.Input label="예산 항목 이름" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="예: 학급운영비, 학습준비물비" className="mb-4"/><UI.Input label="배정 금액" type="number" value={form.total} onChange={e => setForm({ ...form, total: e.target.value })} placeholder="숫자만 입력" className="mb-6"/><div className="flex gap-2"><UI.Btn variant="secondary" onClick={onClose} className="flex-1">취소</UI.Btn><UI.Btn onClick={() => { if (!form.name || !form.total) return alert('모두 입력해주세요.'); onSave(form); }} className="flex-1 bg-gray-800">생성</UI.Btn></div></div>;
+}
+function BudgetForm({ activeTab, initialData, onSave, onClose }) {
+  const [form, setForm] = useState(initialData || { date: new Date().toISOString().slice(0, 10), vendor: '', item: '', amount: '', memo: '', category: activeTab });
+  return <div className="p-6 space-y-4"><UI.Input label="날짜" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /><div className="grid grid-cols-2 gap-4"><UI.Input label="사용처 (상호명)" value={form.vendor} onChange={e => setForm({ ...form, vendor: e.target.value })} placeholder="예: 쿠팡, 다이소" /><UI.Input label="금액" type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="숫자만 입력" /></div><UI.Input label="내역 (품목)" value={form.item} onChange={e => setForm({ ...form, item: e.target.value })} placeholder="예: 만들기 재료, 간식" /><UI.Input label="메모 (선택)" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })} placeholder="비고 사항" /><div className="flex gap-2 mt-6"><UI.Btn variant="secondary" onClick={onClose} className="flex-1">취소</UI.Btn><UI.Btn onClick={() => { if (!form.vendor || !form.item || !form.amount) return alert('필수 항목을 입력해주세요.'); onSave(form); }} className="flex-1 bg-blue-600">{initialData ? '수정' : '기록'}</UI.Btn></div></div>;
+}
 
+// [10] 개별화 교육 (IEP)
 function EducationManager({ students }) {
   const GAS_URL = "여기에_배포된_웹앱_URL을_붙여넣으세요";
   const [selectedStudent, setSelectedStudent] = useState(null);
-  
-  const [iepData, setIepData] = useState({}); 
-  const [meetingList, setMeetingList] = useState([]); 
-  const [loading, setLoading] = useState(false);
-  const [confirm, setConfirm] = useState(null); 
-
-  const fetchData = async () => {
-    if(!GAS_URL || GAS_URL.includes("여기에")) return;
-    setLoading(true);
-    try {
-      const res = await fetch(GAS_URL);
-      const data = await res.json();
-      const formattedIEP = {};
-      (data.iep || []).forEach(row => formattedIEP[`${row.studentId}_${row.month}`] = row);
-      setIepData(formattedIEP);
-      setMeetingList(data.meetings || []);
-    } catch (err) { console.error("Load Error"); }
-    finally { setLoading(false); }
-  };
-
+  const [iepData, setIepData] = useState({}); const [meetingList, setMeetingList] = useState([]); const [loading, setLoading] = useState(false); const [confirm, setConfirm] = useState(null);
+  const fetchData = async () => { setLoading(true); const data = await callGAS(GAS_URL); if(data) { const f = {}; (data.iep||[]).forEach(r => f[`${r.studentId}_${r.month}`] = r); setIepData(f); setMeetingList(data.meetings || []); } setLoading(false); };
   useEffect(() => { fetchData(); }, []);
+  const saveDaily = async (studentId, month, record) => { setLoading(true); setIepData(p => ({ ...p, [`${studentId}_${month}`]: record })); await callGAS(GAS_URL, { type: 'iep', studentId, month, ...record }); setLoading(false); };
+  const saveMeeting = async (mData) => { setLoading(true); const nM = mData.id ? mData : { ...mData, id: Date.now() }; setMeetingList(mData.id ? meetingList.map(m => m.id === mData.id ? nM : m) : [nM, ...meetingList]); await callGAS(GAS_URL, { type: 'iep_meeting', ...nM }); setLoading(false); };
+  const executeDelete = async () => { const id = confirm.id; setLoading(true); setMeetingList(meetingList.filter(m => m.id !== id)); setConfirm(null); await callGAS(GAS_URL, { type: 'iep_meeting', action: 'delete', id }); setLoading(false); };
 
-  const saveDaily = async (studentId, month, record) => {
-    setLoading(true);
-    const key = `${studentId}_${month}`;
-    setIepData(prev => ({ ...prev, [key]: record }));
-    try {
-      await fetch(GAS_URL, {
-        method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: 'iep', studentId, month, ...record }),
-      });
-    } catch (err) { alert("저장 실패"); } finally { setLoading(false); }
+  return (
+    <div className="p-8 max-w-7xl mx-auto"><div className="flex justify-between items-center mb-8"><h2 className="text-3xl font-extrabold text-gray-800">개별화 교육 계획 (IEP)</h2><button onClick={fetchData} className={`p-2.5 rounded-full bg-white border shadow hover:bg-gray-50 ${loading ? 'animate-spin' : ''}`}><RefreshCcw size={20} className="text-gray-600"/></button></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">{students.map(s => (<div key={s.id} onClick={() => setSelectedStudent(s)} className={`cursor-pointer bg-white p-6 rounded-3xl shadow-lg border-4 ${getStudentColor(s.id)} hover:-translate-y-2 transition-all flex items-center gap-4`}><img src={s.photo} className="w-16 h-16 rounded-full border-2 border-white shadow-sm bg-gray-100 object-cover"/><div><div className="font-bold text-xl text-gray-800">{s.name}</div><div className="text-xs text-gray-500 mt-1">{s.grade}학년 {s.classNumber}반</div></div></div>))}</div>
+      {selectedStudent && <UI.Modal onClose={() => setSelectedStudent(null)} title={`${selectedStudent.name} 학생 기록부`} maxWidth="max-w-5xl"><IEPTabContainer student={selectedStudent} iepData={iepData} meetingList={meetingList.filter(m => String(m.studentId) === String(selectedStudent.id))} onSaveDaily={saveDaily} onSaveMeeting={saveMeeting} onDeleteMeeting={(id) => setConfirm({ type: 'delete_meeting', id })} loading={loading} /></UI.Modal>}
+      <ConfirmModal isOpen={!!confirm} message="이 협의록을 정말 삭제하시겠습니까? (시트에서도 삭제됩니다)" onConfirm={executeDelete} onCancel={() => setConfirm(null)} />
+    </div>
+  );
+}
+function IEPTabContainer({ student, iepData, meetingList, onSaveDaily, onSaveMeeting, onDeleteMeeting, loading }) {
+  const [tab, setTab] = useState('daily');
+  return <div className="h-[80vh] flex flex-col bg-gray-50"><div className="flex border-b bg-white px-6"><button onClick={() => setTab('daily')} className={`py-4 px-6 font-bold border-b-2 transition-all ${tab === 'daily' ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-400'}`}>월별 교육 기록</button><button onClick={() => setTab('meeting')} className={`py-4 px-6 font-bold border-b-2 transition-all ${tab === 'meeting' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`}>개별화 협의록 ({meetingList.length})</button></div><div className="flex-1 overflow-hidden">{tab === 'daily' ? <IEPDailyForm student={student} data={iepData} onSave={onSaveDaily} loading={loading} /> : <IEPMeetingList student={student} list={meetingList} onSave={onSaveMeeting} onDelete={onDeleteMeeting} />}</div></div>;
+}
+function IEPDailyForm({ student, data, onSave, loading }) {
+  const [semester, setSemester] = useState(1); const months = semester === 1 ? [3, 4, 5, 6, 7] : [8, 9, 10, 11, 12, 1]; const [activeMonth, setActiveMonth] = useState(months[0]); const [temp, setTemp] = useState({ goal: '', material: '', note: '' });
+  useEffect(() => { setTemp(data[`${student.id}_${activeMonth}`] || { goal: '', material: '', note: '' }); }, [activeMonth, student, data]);
+  return <div className="flex flex-col h-full"><div className="px-6 py-4 flex justify-between items-center bg-white border-b shrink-0"><div className="flex gap-2 overflow-x-auto custom-scrollbar">{months.map(m => (<button key={m} onClick={() => setActiveMonth(m)} className={`px-4 py-2 rounded-lg font-bold text-sm border transition-all ${activeMonth === m ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-400 border-gray-200'}`}>{m}월</button>))}</div><div className="flex bg-gray-100 p-1 rounded-lg text-xs font-bold shrink-0 ml-4"><button onClick={()=>{setSemester(1);setActiveMonth(3)}} className={`px-3 py-1 rounded ${semester===1?'bg-white shadow text-pink-600':'text-gray-400'}`}>1학기</button><button onClick={()=>{setSemester(2);setActiveMonth(8)}} className={`px-3 py-1 rounded ${semester===2?'bg-white shadow text-blue-600':'text-gray-400'}`}>2학기</button></div></div><div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6"><div className="flex items-center justify-between pb-4 border-b border-dashed"><div className="flex items-center gap-2"><span className="text-2xl">📝</span><h3 className="font-bold text-lg">{activeMonth}월 활동 기록</h3></div><UI.Btn onClick={() => onSave(student.id, activeMonth, temp)} disabled={loading} className="py-2 px-4 text-sm">{loading ? '저장중' : '저장하기'}</UI.Btn></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><UI.Input label="🎯 이달의 목표" value={temp.goal} onChange={e=>setTemp({...temp, goal:e.target.value})} /><UI.Input label="📚 교재 및 교구" value={temp.material} onChange={e=>setTemp({...temp, material:e.target.value})} /></div><div className="flex flex-col h-64"><label className="text-xs font-bold text-gray-400 mb-1 ml-1">📝 월간 관찰 기록</label><textarea lang="ko" value={temp.note} onChange={e=>setTemp({...temp, note:e.target.value})} className="flex-1 w-full p-4 bg-yellow-50 border border-yellow-200 rounded-xl outline-none resize-none focus:ring-2 focus:ring-yellow-300" placeholder="내용 입력" /></div></div></div>;
+}
+function IEPMeetingList({ student, list, onSave, onDelete }) {
+  const [view, setView] = useState('list'); const [editData, setEditData] = useState(null);
+  const startEdit = (data) => { setEditData(data || { studentId: student.id, date: new Date().toISOString().slice(0,10), attendees: '', subjects: student.targetSubjects?.join(', ') || '', agreement: '', original: '', summary: '' }); setView('edit'); };
+  return view === 'list' ? (<div className="flex flex-col h-full p-6"><div className="flex justify-between items-center mb-6"><h3 className="font-bold text-lg">협의록 목록</h3><button onClick={() => startEdit(null)} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600"><Plus size={18}/> 새 협의록 작성</button></div><div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">{list.length > 0 ? list.map(m => (<div key={m.id} onClick={() => startEdit(m)} className="bg-white border rounded-xl p-4 hover:shadow-md cursor-pointer transition-all flex justify-between items-center"><div><div className="font-bold text-gray-800 mb-1">{m.date} 협의회</div><div className="text-xs text-gray-500 truncate max-w-md">{m.attendees} 참석 / {m.subjects}</div></div><button onClick={(e) => {e.stopPropagation(); onDelete(m.id)}} className="p-2 text-gray-300 hover:text-red-500"><Trash2 size={16}/></button></div>)) : <div className="text-center text-gray-400 py-10">작성된 협의록이 없습니다.</div>}</div></div>) : (<IEPMeetingForm student={student} initialData={editData} onSave={d => { onSave(d); setView('list'); }} onCancel={() => setView('list')} />);
+}
+function IEPMeetingForm({ student, initialData, onSave, onCancel }) {
+  const [form, setForm] = useState(initialData); const [aiLoading, setAiLoading] = useState(false);
+  const toggleRole = (r) => { const roles = (form.attendees||'').split(', ').filter(x=>x); setForm({...form, attendees: roles.includes(r)?roles.filter(x=>x!==r).join(', '):[...roles,r].join(', ')}) };
+  const toggleBoilerplate = (text) => { if (form.agreement.includes(text)) { setForm(prev => ({ ...prev, agreement: prev.agreement.replace(text, '').replace(/\n\n/g, '\n').trim() })); } else { setForm(prev => ({ ...prev, agreement: (prev.agreement ? prev.agreement + "\n\n" : "") + text })); } };
+  const handleAISummary = async () => {
+    const key = localStorage.getItem('google_api_key'); if(!key) return alert("설정 탭에서 Google API 키를 등록해주세요.");
+    if(!form.original) return alert("회의록 원본 내용을 먼저 입력해주세요."); setAiLoading(true);
+    try { const txt = await callGemini(JSON.parse(key)||key, `당신은 특수교육 전문가입니다. 다음 회의 녹취록(Raw Data)을 분석하여, '공식적인 개별화교육지원팀 협의록'에 들어갈 정돈되고 전문적인 교육 용어로 요약 정리해주세요. 문체는 건조하고 명확하게 작성하세요.\n\n[녹취록]: ${form.original}`); if(txt) setForm(p=>({...p, summary:txt})); else alert("요약 결과를 가져오지 못했습니다."); } catch(e){ alert("AI 요약 실패: " + e.message); } finally { setAiLoading(false); }
   };
+  const BOILERPLATES = [ { label: "신체적 개입", text: "본인 및 타인의 안전을 위협하는 돌발행동(자해, 타해 등) 발생 시, 교사가 즉각적인 신체적 개입(손목 가이드, 타임아웃 등)을 통해 안전을 확보하는 것에 대해 보호자가 충분히 인지하고 동의함." }, { label: "교육과정 조정", text: "통합학급 수업 중 학생의 현행 수준과 특성을 고려하여, 특수교사가 별도의 학습지 제공 또는 수정된 과제를 제시하는 것에 동의함." }, { label: "행동 중재", text: "긍정적 행동 지원을 위해 강화물(간식, 토큰 등) 사용 및 타임아웃 절차를 적용하며, 가정에서도 일관된 지도를 연계하기로 함." }, { label: "응급 처치", text: "응급 상황 발생 시 학교의 안전 매뉴얼에 따라 조치하며, 보호자에게 즉시 연락 취함. 연락이 닿지 않을 경우 병원 이송 등에 동의함." } ];
 
-  const saveMeeting = async (meetingData) => {
-    setLoading(true);
-    const newM = meetingData.id ? meetingData : { ...meetingData, id: Date.now() };
-    if (meetingData.id) setMeetingList(meetingList.map(m => m.id === meetingData.id ? newM : m));
-    else setMeetingList([newM, ...meetingList]);
-    try {
-      await fetch(GAS_URL, {
-        method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: 'iep_meeting', ...newM }),
-      });
-    } catch (err) { alert("저장 실패"); } finally { setLoading(false); }
-  };
+  return (
+    <div className="flex flex-col h-full bg-white"><div className="p-4 border-b flex items-center justify-between bg-gray-50"><h3 className="font-bold">📝 협의록 작성</h3><div className="flex gap-2"><button onClick={onCancel} className="px-4 py-2 bg-white border rounded-lg text-sm font-bold">취소</button><button onClick={() => onSave(form)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold">저장하기</button></div></div>
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-6"><div className="grid grid-cols-2 gap-6 mb-6"><UI.Input label="협의 날짜" type="date" value={form.date} onChange={e => setForm({...form, date: e.target.value})} /><div><label className="block text-xs font-bold text-gray-400 mb-2 ml-1">참석자</label><div className="flex gap-3">{[{k:'parent', l:'보호자'}, {k:'special', l:'특수교사'}, {k:'homeroom', l:'담임교사'}, {k:'vice', l:'교감'}].map(r => (<button key={r.k} onClick={() => toggleRole(r.l)} className={`px-3 py-2 rounded-lg text-sm font-bold border ${(form.attendees||'').includes(r.l) ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>{r.l}</button>))}</div></div></div>
+        <div className="space-y-4 mb-6"><UI.Input label="개별화교육 과목" value={form.subjects} onChange={e => setForm({...form, subjects: e.target.value})} placeholder="예: 국어, 수학" /><div><label className="block text-xs font-bold text-gray-400 mb-1 ml-1">🤝 행동 중재 및 신체적 개입 동의</label><textarea lang="ko" value={form.agreement} onChange={e => setForm({...form, agreement: e.target.value})} className="w-full p-3 bg-red-50 border border-red-100 rounded-xl text-sm focus:ring-2 focus:ring-red-200 outline-none h-24 resize-none" placeholder="협의된 동의 내용을 입력하세요." /><div className="mt-2 flex flex-wrap gap-2"><span className="text-xs font-bold text-gray-400 flex items-center mr-1">⚡ 상용구(토글):</span>{BOILERPLATES.map((bp, idx) => { const isActive = form.agreement.includes(bp.text); return <button key={idx} onClick={() => toggleBoilerplate(bp.text)} className={`px-2 py-1 rounded text-xs font-bold transition-all ${isActive ? 'bg-green-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{isActive ? '✓ ' : ''}{bp.label}</button> })}</div></div></div>
+        <div className="grid grid-cols-2 gap-6 h-64"><div className="flex flex-col"><label className="block text-xs font-bold text-gray-400 mb-1">🎤 회의록 원본 (Raw Data)</label><textarea lang="ko" value={form.original} onChange={e => setForm({...form, original: e.target.value})} className="flex-1 w-full p-3 bg-gray-50 border rounded-xl text-sm resize-none" placeholder="클로바노트 결과 등을 붙여넣으세요." /></div><div className="flex flex-col relative"><label className="block text-xs font-bold text-gray-400 mb-1">🤖 AI 요약 / 정리본</label><textarea lang="ko" value={form.summary} onChange={e => setForm({...form, summary: e.target.value})} className="flex-1 w-full p-3 bg-purple-50 border border-purple-100 rounded-xl text-sm resize-none" placeholder="AI가 요약한 내용이 여기에 들어갑니다." /><button onClick={handleAISummary} disabled={aiLoading} className={`absolute bottom-4 right-4 px-4 py-2 rounded-xl text-xs font-bold shadow-lg flex items-center gap-2 transition-all ${aiLoading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105'}`}>{aiLoading ? <span className="animate-spin">⌛</span> : <Wand2 size={14}/>} {aiLoading ? '요약 중...' : 'Google AI 자동 요약'}</button></div></div></div>
+    </div>
+  );
+}
 
-  const executeDelete = async () => {
-    if (!confirm) return;
-    const id = confirm.id;
-    setLoading(true);
-    setMeetingList(meetingList.filter(m => m.id !== id));
-    setConfirm(null);
-    try {
-      await fetch(GAS_URL, {
-        method: "POST", mode: "no-cors", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: 'iep_meeting', action: 'delete', id }),
-      });
-    } catch (err) { alert("삭제 실패"); } finally { setLoading(false); }
+// [11] 설정 및 기타
+function SettingsPage({ storedPw, setStoredPw, security, setSecurity, showGlobalError }) {
+  const [apiKey, setApiKey] = usePersistentState('google_api_key', ''); const [showKey, setShowKey] = useState(false); const r = useRef();
+  const backup = () => { const d = STORAGE_KEYS.reduce((a, k) => ({ ...a, [k]: localStorage.getItem(k) }), {}); delete d['google_api_key']; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d)], {type:'json'})); a.download = `teacher_manager_backup_${new Date().toISOString().slice(0,10)}.json`; a.click(); };
+  const restore = (e) => { const rd = new FileReader(); rd.onload = (ev) => { try { const d = JSON.parse(ev.target.result); STORAGE_KEYS.forEach(k => { if(d[k]) localStorage.setItem(k, d[k]) }); alert('데이터가 성공적으로 복구되었습니다.'); window.location.reload(); } catch { showGlobalError('올바르지 않은 백업 파일입니다.'); } }; if(e.target.files[0]) rd.readAsText(e.target.files[0]); };
+  return (
+    <div className="p-8 max-w-2xl mx-auto"><h2 className="text-3xl font-extrabold mb-8 text-gray-800">환경 설정</h2><div className="space-y-6">
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100"><div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600"><Wand2 size={18}/></div><h3 className="font-bold text-lg text-gray-800">AI 기능 설정 (Google Gemini)</h3></div><div className="bg-blue-50 p-4 rounded-xl text-xs text-blue-700 mb-4 leading-relaxed"><b>🔑 본인의 Google API Key를 입력해주세요.</b><br/> 키는 서버로 전송되지 않고, 선생님의 브라우저에만 안전하게 저장됩니다.<br/> (AI Studio에서 발급받은 키를 사용하세요.)</div><div className="relative"><input type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="w-full p-4 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 font-mono text-sm" placeholder="AIzaSy..." /><button onClick={() => setShowKey(!showKey)} className="absolute right-4 top-4 text-gray-400 hover:text-blue-600">{showKey ? <User size={18}/> : <Lock size={18}/>}</button></div></div>
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100"><div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-600"><Database size={18}/></div><h3 className="font-bold text-lg text-gray-800">데이터 백업 및 복구</h3></div><div className="flex gap-4"><button onClick={backup} className="flex-1 p-4 bg-gray-50 text-gray-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors"><Download size={20}/> 백업 파일 다운로드</button><button onClick={() => r.current.click()} className="flex-1 p-4 bg-green-50 text-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-100 transition-colors"><Upload size={20}/> 백업 파일 불러오기</button><input type="file" ref={r} onChange={restore} className="hidden" accept=".json"/></div><div className="mt-6 pt-4 border-t"><button onClick={() => { if(confirm('정말 초기화하시겠습니까?')) { localStorage.clear(); window.location.reload(); }}} className="w-full py-3 text-red-400 text-sm font-bold hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-2"><Trash2 size={16}/> 앱 초기화</button></div></div></div></div>
+  );
+}
+
+// [12] 사진 관리 (다중 업로드 + 슬라이더 적용)
+function PhotoManager() {
+  const [posts, setPosts] = usePersistentState('class_photos', []); 
+  const [modal, setModal] = useState(null);
+
+  // [수정사항 2] 다중 이미지 저장 구조로 변경 (기존 데이터 호환 고려)
+  const addPost = (data) => {
+    // data.images: array of base64 strings
+    setPosts([{ ...data, id: Date.now(), date: new Date().toLocaleDateString() }, ...posts]);
+    setModal(null);
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-3xl font-extrabold text-gray-800">개별화 교육 계획 (IEP)</h2>
-        <button onClick={fetchData} className={`p-2.5 rounded-full bg-white border shadow hover:bg-gray-50 ${loading ? 'animate-spin' : ''}`}>
-          <RefreshCcw size={20} className="text-gray-600"/>
-        </button>
-      </div>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-        {students.map(s => (
-          <div key={s.id} onClick={() => setSelectedStudent(s)} className={`cursor-pointer bg-white p-6 rounded-3xl shadow-lg border-4 ${getStudentColor(s.id)} hover:-translate-y-2 transition-all flex items-center gap-4`}>
-            <img src={s.photo} className="w-16 h-16 rounded-full border-2 border-white shadow-sm bg-gray-100 object-cover"/>
-            <div><div className="font-bold text-xl text-gray-800">{s.name}</div><div className="text-xs text-gray-500 mt-1">{s.grade}학년 {s.classNumber}반</div></div>
+    <div className="p-8 h-full flex flex-col">
+      <h2 className="text-3xl font-extrabold mb-8 text-gray-800">학급 앨범 ({posts.length})</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {posts.map(post => (
+          <div key={post.id} onClick={() => setModal({ type: 'view', data: post })} className="bg-white rounded-[2rem] shadow-lg border border-gray-100 overflow-hidden cursor-pointer hover:-translate-y-2 transition-transform group">
+            <div className="aspect-square bg-gray-100 relative">
+              {/* 첫 번째 이미지만 썸네일로 표시 */}
+              <img src={post.images ? post.images[0] : post.url} className="w-full h-full object-cover" />
+              {post.images && post.images.length > 1 && (
+                <div className="absolute top-4 right-4 bg-black/50 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                  <MoreHorizontal size={12}/> +{post.images.length - 1}
+                </div>
+              )}
+            </div>
+            <div className="p-4">
+              <p className="font-bold text-gray-800 truncate">{post.caption || '무제'}</p>
+              <p className="text-xs text-gray-400 mt-1">{post.date}</p>
+            </div>
           </div>
         ))}
       </div>
-
-      {selectedStudent && (
-        <UI.Modal onClose={() => setSelectedStudent(null)} title={`${selectedStudent.name} 학생 기록부`} maxWidth="max-w-5xl">
-          <IEPTabContainer 
-            student={selectedStudent} 
-            iepData={iepData} 
-            meetingList={meetingList.filter(m => String(m.studentId) === String(selectedStudent.id))}
-            onSaveDaily={saveDaily}
-            onSaveMeeting={saveMeeting}
-            onDeleteMeeting={(id) => setConfirm({ type: 'delete_meeting', id })}
-            loading={loading}
-          />
+      <button onClick={() => setModal({ type: 'upload' })} className="fixed bottom-8 right-8 w-16 h-16 bg-pink-500 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-transform z-20"><Plus size={32}/></button>
+      
+      {modal?.type === 'upload' && (
+        <UI.Modal onClose={() => setModal(null)} title="새 사진 올리기" maxWidth="max-w-md">
+          <PhotoUploadForm onSave={addPost} />
         </UI.Modal>
       )}
-
-      <ConfirmModal 
-        isOpen={!!confirm} 
-        message="이 협의록을 정말 삭제하시겠습니까? (시트에서도 삭제됩니다)" 
-        onConfirm={executeDelete} 
-        onCancel={() => setConfirm(null)} 
-      />
-    </div>
-  );
-}
-
-function IEPTabContainer({ student, iepData, meetingList, onSaveDaily, onSaveMeeting, onDeleteMeeting, loading }) {
-  const [tab, setTab] = useState('daily');
-  return (
-    <div className="h-[80vh] flex flex-col bg-gray-50">
-      <div className="flex border-b bg-white px-6">
-        <button onClick={() => setTab('daily')} className={`py-4 px-6 font-bold border-b-2 transition-all ${tab === 'daily' ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-400'}`}>월별 교육 기록</button>
-        <button onClick={() => setTab('meeting')} className={`py-4 px-6 font-bold border-b-2 transition-all ${tab === 'meeting' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`}>개별화 협의록 ({meetingList.length})</button>
-      </div>
-      <div className="flex-1 overflow-hidden">
-        {tab === 'daily' ? <IEPDailyForm student={student} data={iepData} onSave={onSaveDaily} loading={loading} /> : <IEPMeetingList student={student} list={meetingList} onSave={onSaveMeeting} onDelete={onDeleteMeeting} />}
-      </div>
-    </div>
-  );
-}
-
-function IEPDailyForm({ student, data, onSave, loading }) {
-  const [semester, setSemester] = useState(1);
-  const months = semester === 1 ? [3, 4, 5, 6, 7] : [8, 9, 10, 11, 12, 1];
-  const [activeMonth, setActiveMonth] = useState(months[0]);
-  const [temp, setTemp] = useState({ goal: '', material: '', note: '' });
-
-  useEffect(() => {
-    const key = `${student.id}_${activeMonth}`;
-    setTemp(data[key] || { goal: '', material: '', note: '' });
-  }, [activeMonth, student, data]);
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="px-6 py-4 flex justify-between items-center bg-white border-b shrink-0">
-        <div className="flex gap-2 overflow-x-auto custom-scrollbar">
-          {months.map(m => (<button key={m} onClick={() => setActiveMonth(m)} className={`px-4 py-2 rounded-lg font-bold text-sm border transition-all ${activeMonth === m ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-400 border-gray-200'}`}>{m}월</button>))}
-        </div>
-        <div className="flex bg-gray-100 p-1 rounded-lg text-xs font-bold shrink-0 ml-4">
-          <button onClick={()=>{setSemester(1);setActiveMonth(3)}} className={`px-3 py-1 rounded ${semester===1?'bg-white shadow text-pink-600':'text-gray-400'}`}>1학기</button>
-          <button onClick={()=>{setSemester(2);setActiveMonth(8)}} className={`px-3 py-1 rounded ${semester===2?'bg-white shadow text-blue-600':'text-gray-400'}`}>2학기</button>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
-        <div className="flex items-center justify-between pb-4 border-b border-dashed">
-          <div className="flex items-center gap-2"><span className="text-2xl">📝</span><h3 className="font-bold text-lg">{activeMonth}월 활동 기록</h3></div>
-          <UI.Btn onClick={() => onSave(student.id, activeMonth, temp)} disabled={loading} className="py-2 px-4 text-sm">{loading ? '저장중' : '저장하기'}</UI.Btn>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <UI.Input label="🎯 이달의 목표" value={temp.goal} onChange={e=>setTemp({...temp, goal:e.target.value})} />
-          <UI.Input label="📚 교재 및 교구" value={temp.material} onChange={e=>setTemp({...temp, material:e.target.value})} />
-        </div>
-        <div className="flex flex-col h-64">
-          <label className="text-xs font-bold text-gray-400 mb-1 ml-1">📝 월간 관찰 기록</label>
-          <textarea value={temp.note} onChange={e=>setTemp({...temp, note:e.target.value})} className="flex-1 w-full p-4 bg-yellow-50 border border-yellow-200 rounded-xl outline-none resize-none focus:ring-2 focus:ring-yellow-300" placeholder="내용 입력" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function IEPMeetingList({ student, list, onSave, onDelete }) {
-  const [view, setView] = useState('list'); 
-  const [editData, setEditData] = useState(null);
-  const startEdit = (data) => { setEditData(data || { studentId: student.id, date: new Date().toISOString().slice(0,10), attendees: '', subjects: student.targetSubjects?.join(', ') || '', agreement: '', original: '', summary: '' }); setView('edit'); };
-
-  return view === 'list' ? (
-    <div className="flex flex-col h-full p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h3 className="font-bold text-lg">협의록 목록</h3>
-        <button onClick={() => startEdit(null)} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600"><Plus size={18}/> 새 협의록 작성</button>
-      </div>
-      <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-        {list.length > 0 ? list.map(m => (
-          <div key={m.id} onClick={() => startEdit(m)} className="bg-white border rounded-xl p-4 hover:shadow-md cursor-pointer transition-all flex justify-between items-center">
-             <div><div className="font-bold text-gray-800 mb-1">{m.date} 협의회</div><div className="text-xs text-gray-500 truncate max-w-md">{m.attendees} 참석 / {m.subjects}</div></div>
-             <button onClick={(e) => {e.stopPropagation(); onDelete(m.id)}} className="p-2 text-gray-300 hover:text-red-500"><Trash2 size={16}/></button>
-          </div>
-        )) : <div className="text-center text-gray-400 py-10">작성된 협의록이 없습니다.</div>}
-      </div>
-    </div>
-  ) : (
-    <IEPMeetingForm student={student} initialData={editData} onSave={d => { onSave(d); setView('list'); }} onCancel={() => setView('list')} />
-  );
-}
-
-// [Google Gemini 적용]
-function IEPMeetingForm({ student, initialData, onSave, onCancel }) {
-  const [form, setForm] = useState(initialData);
-  const [roles, setRoles] = useState({ parent: false, special: true, homeroom: false, vice: false }); 
-  const [aiLoading, setAiLoading] = useState(false);
-
-  useEffect(() => {
-    if(initialData.attendees) setRoles({ parent: initialData.attendees.includes('보호자'), special: initialData.attendees.includes('특수'), homeroom: initialData.attendees.includes('담임'), vice: initialData.attendees.includes('교감') });
-  }, []);
-
-  const updateRoles = (key) => {
-    const newRoles = { ...roles, [key]: !roles[key] };
-    setRoles(newRoles);
-    const arr = [];
-    if(newRoles.parent) arr.push('보호자'); if(newRoles.special) arr.push('특수교사'); if(newRoles.homeroom) arr.push('담임교사'); if(newRoles.vice) arr.push('교감');
-    setForm(prev => ({ ...prev, attendees: arr.join(', ') }));
-  };
-
-  const toggleBoilerplate = (text) => {
-    if (form.agreement.includes(text)) {
-      setForm(prev => ({ ...prev, agreement: prev.agreement.replace(text, '').replace(/\n\n/g, '\n').trim() }));
-    } else {
-      setForm(prev => ({ ...prev, agreement: (prev.agreement ? prev.agreement + "\n\n" : "") + text }));
-    }
-  };
-
-// ★★★ [최종 해결] 자동 재시도 기능이 포함된 안정적 요약 로직 ★★★
-const handleAISummary = async () => {
-  const storedKey = localStorage.getItem('google_api_key');
-  if (!storedKey) return alert("설정 탭에서 Google API 키를 등록해주세요.");
-
-  let cleanKey = "";
-  try { cleanKey = JSON.parse(storedKey).trim(); } 
-  catch (e) { cleanKey = storedKey.replace(/^"|"$/g, '').trim(); }
-
-  if (!cleanKey || cleanKey === "null") return alert("유효한 API 키가 없습니다.");
-  if (!form.original) return alert("회의록 원본 내용을 먼저 입력해주세요.");
-
-  setAiLoading(true);
-
-  // 내부 재시도 함수
-  const fetchWithRetry = async (retries = 3) => {
-    try {
-      // 안정적인 2.5 Flash 모델 사용
-      const modelId = "gemini-2.5-flash"; 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${cleanKey}`;
       
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `당신은 특수교육 전문가입니다. 다음 회의 녹취록(Raw Data)을 분석하여, '공식적인 개별화교육지원팀 협의록'에 들어갈 정돈되고 전문적인 교육 용어로 요약 정리해주세요. 문체는 건조하고 명확하게 작성하세요.\n\n[녹취록]: ${form.original}`
-            }]
-          }]
-        })
+      {modal?.type === 'view' && (
+        <UI.Modal onClose={() => setModal(null)} maxWidth="max-w-4xl">
+          <PhotoViewer post={modal.data} onDelete={(id) => { setPosts(posts.filter(p => p.id !== id)); setModal(null); }} />
+        </UI.Modal>
+      )}
+    </div>
+  );
+}
+
+// [수정사항 2] 사진 업로드 폼 (다중 선택)
+function PhotoUploadForm({ onSave }) {
+  const [images, setImages] = useState([]);
+  const [caption, setCaption] = useState('');
+  const fileRef = useRef();
+
+  const handleFileChange = async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    // 모든 파일을 Base64로 변환
+    const promises = files.map(file => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
       });
+    });
 
-      const data = await response.json();
-      
-      if (data.error) {
-        // 서버 과부하(503) 혹은 너무 많은 요청(429) 시 재시도
-        if ((data.error.code === 503 || data.error.status === "UNAVAILABLE" || data.error.message.includes("overloaded")) && retries > 0) {
-          console.log(`서버 바쁨... 재시도 중 (남은 횟수: ${retries})`);
-          await new Promise(res => setTimeout(res, 1500)); // 1.5초 대기 후 재시도
-          return fetchWithRetry(retries - 1);
-        }
-        throw new Error(data.error.message);
-      }
-      
-      return data.candidates?.[0]?.content?.parts?.[0]?.text;
-    } catch (err) {
-      if (retries > 0) {
-        await new Promise(res => setTimeout(res, 1500));
-        return fetchWithRetry(retries - 1);
-      }
-      throw err;
+    try {
+      const results = await Promise.all(promises);
+      setImages([...images, ...results]);
+    } catch (error) {
+      alert("이미지 변환 중 오류가 발생했습니다.");
     }
   };
 
-  try {
-    const summaryText = await fetchWithRetry();
-    if (summaryText) {
-      setForm(prev => ({ ...prev, summary: summaryText }));
-    } else {
-      alert("요약 결과를 가져오지 못했습니다.");
-    }
-  } catch (e) {
-    alert("AI 요약 실패: " + e.message + "\n\n잠시 후 다시 시도해 주세요.");
-  } finally {
-    setAiLoading(false);
-  }
-};
+  return (
+    <div className="p-6">
+      <div className="flex gap-2 overflow-x-auto mb-4 pb-2">
+        <div onClick={() => fileRef.current.click()} className="w-24 h-24 shrink-0 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:border-pink-300 hover:text-pink-400 transition-colors">
+          <Camera size={24}/>
+          <span className="text-xs mt-1 font-bold">추가</span>
+        </div>
+        {images.map((img, idx) => (
+          <div key={idx} className="w-24 h-24 shrink-0 rounded-xl overflow-hidden relative group">
+            <img src={img} className="w-full h-full object-cover"/>
+            <button onClick={() => setImages(images.filter((_, i) => i !== idx))} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></button>
+          </div>
+        ))}
+      </div>
+      <input type="file" ref={fileRef} onChange={handleFileChange} className="hidden" multiple accept="image/*"/>
+      <textarea lang="ko" value={caption} onChange={e => setCaption(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl outline-none resize-none h-32" placeholder="어떤 활동이었나요?" />
+      <UI.Btn onClick={() => { if(images.length === 0) return alert("사진을 1장 이상 선택해주세요."); onSave({ images, caption }); }} className="w-full mt-4 bg-pink-500">게시하기</UI.Btn>
+    </div>
+  );
+}
 
-  const BOILERPLATES = [
-      { label: "신체적 개입", text: "본인 및 타인의 안전을 위협하는 돌발행동(자해, 타해 등) 발생 시, 교사가 즉각적인 신체적 개입(손목 가이드, 타임아웃 등)을 통해 안전을 확보하는 것에 대해 보호자가 충분히 인지하고 동의함." },
-      { label: "교육과정 조정", text: "통합학급 수업 중 학생의 현행 수준과 특성을 고려하여, 특수교사가 별도의 학습지 제공 또는 수정된 과제를 제시하는 것에 동의함." },
-      { label: "행동 중재", text: "긍정적 행동 지원을 위해 강화물(간식, 토큰 등) 사용 및 타임아웃 절차를 적용하며, 가정에서도 일관된 지도를 연계하기로 함." },
-      { label: "응급 처치", text: "응급 상황 발생 시 학교의 안전 매뉴얼에 따라 조치하며, 보호자에게 즉시 연락 취함. 연락이 닿지 않을 경우 병원 이송 등에 동의함." }
-  ];
+// [수정사항 2] 사진 뷰어 (슬라이더 구현)
+function PhotoViewer({ post, onDelete }) {
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const images = post.images || [post.url]; // 구버전 호환
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="p-4 border-b flex items-center justify-between bg-gray-50">
-        <h3 className="font-bold">📝 협의록 작성</h3>
-        <div className="flex gap-2">
-           <button onClick={onCancel} className="px-4 py-2 bg-white border rounded-lg text-sm font-bold">취소</button>
-           <button onClick={() => onSave(form)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold">저장하기</button>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
-        <div className="grid grid-cols-2 gap-6 mb-6">
-           <UI.Input label="협의 날짜" type="date" value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
-           <div>
-              <label className="block text-xs font-bold text-gray-400 mb-2 ml-1">참석자</label>
-              <div className="flex gap-3">
-                 {[{k:'parent', l:'보호자'}, {k:'special', l:'특수교사'}, {k:'homeroom', l:'담임교사'}, {k:'vice', l:'교감'}].map(r => (
-                   <button key={r.k} onClick={() => updateRoles(r.k)} className={`px-3 py-2 rounded-lg text-sm font-bold border ${roles[r.k] ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>{r.l}</button>
-                 ))}
-              </div>
-           </div>
-        </div>
+    <div className="flex flex-col md:flex-row h-[80vh]">
+      {/* 이미지 슬라이더 영역 */}
+      <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
+        <img src={images[currentIdx]} className="max-w-full max-h-full object-contain" />
         
-        <div className="space-y-4 mb-6">
-           <UI.Input label="개별화교육 과목" value={form.subjects} onChange={e => setForm({...form, subjects: e.target.value})} placeholder="예: 국어, 수학" />
-           
-           <div>
-              <label className="block text-xs font-bold text-gray-400 mb-1 ml-1">🤝 행동 중재 및 신체적 개입 동의</label>
-              <textarea value={form.agreement} onChange={e => setForm({...form, agreement: e.target.value})} className="w-full p-3 bg-red-50 border border-red-100 rounded-xl text-sm focus:ring-2 focus:ring-red-200 outline-none h-24 resize-none" placeholder="협의된 동의 내용을 입력하세요." />
-              <div className="mt-2 flex flex-wrap gap-2">
-                  <span className="text-xs font-bold text-gray-400 flex items-center mr-1">⚡ 상용구(토글):</span>
-                  {BOILERPLATES.map((bp, idx) => {
-                      const isActive = form.agreement.includes(bp.text);
-                      return <button key={idx} onClick={() => toggleBoilerplate(bp.text)} className={`px-2 py-1 rounded text-xs font-bold transition-all ${isActive ? 'bg-green-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{isActive ? '✓ ' : ''}{bp.label}</button>
-                  })}
-              </div>
-           </div>
-        </div>
+        {/* 네비게이션 버튼 */}
+        {images.length > 1 && (
+          <>
+            {currentIdx > 0 && (
+              <button onClick={() => setCurrentIdx(currentIdx - 1)} className="absolute left-4 top-1/2 -translate-y-1/2 bg-black/30 text-white p-2 rounded-full hover:bg-black/50 backdrop-blur-sm"><ChevronLeft size={24}/></button>
+            )}
+            {currentIdx < images.length - 1 && (
+              <button onClick={() => setCurrentIdx(currentIdx + 1)} className="absolute right-4 top-1/2 -translate-y-1/2 bg-black/30 text-white p-2 rounded-full hover:bg-black/50 backdrop-blur-sm"><ChevronRight size={24}/></button>
+            )}
+            {/* 인디케이터 */}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5">
+              {images.map((_, idx) => (
+                <div key={idx} className={`w-2 h-2 rounded-full transition-all ${idx === currentIdx ? 'bg-white scale-110' : 'bg-white/30'}`} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
-        <div className="grid grid-cols-2 gap-6 h-64">
-           <div className="flex flex-col">
-              <label className="block text-xs font-bold text-gray-400 mb-1">🎤 회의록 원본 (Raw Data)</label>
-              <textarea value={form.original} onChange={e => setForm({...form, original: e.target.value})} className="flex-1 w-full p-3 bg-gray-50 border rounded-xl text-sm resize-none" placeholder="클로바노트 결과 등을 붙여넣으세요." />
-           </div>
-           <div className="flex flex-col relative">
-              <label className="block text-xs font-bold text-gray-400 mb-1">🤖 AI 요약 / 정리본</label>
-              <textarea value={form.summary} onChange={e => setForm({...form, summary: e.target.value})} className="flex-1 w-full p-3 bg-purple-50 border border-purple-100 rounded-xl text-sm resize-none" placeholder="AI가 요약한 내용이 여기에 들어갑니다." />
-              <button 
-                onClick={handleAISummary}
-                disabled={aiLoading}
-                className={`absolute bottom-4 right-4 px-4 py-2 rounded-xl text-xs font-bold shadow-lg flex items-center gap-2 transition-all ${aiLoading ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:scale-105'}`}
-              >
-                {aiLoading ? <span className="animate-spin">⌛</span> : <Wand2 size={14}/>}
-                {aiLoading ? '요약 중...' : 'Google AI 자동 요약'}
-              </button>
-           </div>
+      {/* 정보 영역 */}
+      <div className="w-full md:w-96 bg-white p-6 border-l flex flex-col shrink-0">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-full bg-pink-100 flex items-center justify-center text-pink-500 font-bold">T</div>
+          <div>
+            <p className="font-bold text-sm text-gray-800">선생님</p>
+            <p className="text-xs text-gray-400">{post.date}</p>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{post.caption}</p>
+        </div>
+        <div className="pt-6 border-t mt-4">
+          <button onClick={() => { if(confirm("정말 삭제하시겠습니까?")) onDelete(post.id); }} className="text-red-400 text-sm font-bold flex items-center gap-2 hover:text-red-600"><Trash2 size={16}/> 게시물 삭제</button>
         </div>
       </div>
     </div>
   );
-}
-// =================================================================================
-// [11] 설정 페이지 (Google Gemini 버전)
-// =================================================================================
-
-function SettingsPage({ storedPw, setStoredPw, security, setSecurity, showGlobalError }) {
-  // 키 저장소 이름을 google_api_key로 변경
-  const [apiKey, setApiKey] = usePersistentState('google_api_key', '');
-  const [showKey, setShowKey] = useState(false);
-  const r = useRef();
-
-  const backup = () => { 
-    const data = STORAGE_KEYS.reduce((acc, k) => ({ ...acc, [k]: localStorage.getItem(k) }), {});
-    delete data['google_api_key']; // 백업 제외
-    const a = document.createElement('a'); 
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], {type:'json'})); 
-    a.download = `teacher_manager_backup_${new Date().toISOString().slice(0,10)}.json`; 
-    a.click(); 
-  };
-
-  const restore = (e) => { 
-    const rd = new FileReader(); 
-    rd.onload = (ev) => { 
-      try { 
-        const d = JSON.parse(ev.target.result); 
-        STORAGE_KEYS.forEach(k => { if(d[k]) localStorage.setItem(k, d[k]) }); 
-        alert('데이터가 성공적으로 복구되었습니다.'); 
-        window.location.reload(); 
-      } catch { showGlobalError('올바르지 않은 백업 파일입니다.'); } 
-    }; 
-    if(e.target.files[0]) rd.readAsText(e.target.files[0]); 
-  };
-
-  return (
-    <div className="p-8 max-w-2xl mx-auto">
-      <h2 className="text-3xl font-extrabold mb-8 text-gray-800">환경 설정</h2>
-      
-      <div className="space-y-6">
-        {/* 1. AI 기능 설정 (Google 버전) */}
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600"><Wand2 size={18}/></div>
-            <h3 className="font-bold text-lg text-gray-800">AI 기능 설정 (Google Gemini)</h3>
-          </div>
-          <div className="bg-blue-50 p-4 rounded-xl text-xs text-blue-700 mb-4 leading-relaxed">
-            <b>🔑 본인의 Google API Key를 입력해주세요.</b><br/>
-            키는 서버로 전송되지 않고, 선생님의 브라우저에만 안전하게 저장됩니다.<br/>
-            (AI Studio에서 발급받은 키를 사용하세요.)
-          </div>
-          <div className="relative">
-            <input 
-              type={showKey ? "text" : "password"} 
-              value={apiKey} 
-              onChange={(e) => setApiKey(e.target.value)} 
-              className="w-full p-4 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 font-mono text-sm"
-              placeholder="AIzaSy..." 
-            />
-            <button onClick={() => setShowKey(!showKey)} className="absolute right-4 top-4 text-gray-400 hover:text-blue-600">
-              {showKey ? <User size={18}/> : <Lock size={18}/>}
-            </button>
-          </div>
-        </div>
-
-        {/* 2. 데이터 관리 */}
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-600"><Database size={18}/></div>
-            <h3 className="font-bold text-lg text-gray-800">데이터 백업 및 복구</h3>
-          </div>
-          <div className="flex gap-4">
-            <button onClick={backup} className="flex-1 p-4 bg-gray-50 text-gray-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors">
-              <Download size={20}/> 백업 파일 다운로드
-            </button>
-            <button onClick={() => r.current.click()} className="flex-1 p-4 bg-green-50 text-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-100 transition-colors">
-              <Upload size={20}/> 백업 파일 불러오기
-            </button>
-            <input type="file" ref={r} onChange={restore} className="hidden" accept=".json"/>
-          </div>
-          <div className="mt-6 pt-4 border-t">
-            <button onClick={() => { if(confirm('정말 초기화하시겠습니까?')) { localStorage.clear(); window.location.reload(); }}} className="w-full py-3 text-red-400 text-sm font-bold hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-2">
-              <Trash2 size={16}/> 앱 초기화
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-// =================================================================================
-// [12] 기타 컴포넌트 (개별화/사진/설정/투두) - 기존 유지
-// =================================================================================
-
-function PhotoManager() {
-  const [ps, setPs] = usePersistentState('class_photos', []); const [m, setM] = useState(null);
-  const add = (d) => { setPs([{...d, id:Date.now(), comments:[], date:new Date().toLocaleDateString()}, ...ps]); setM(null); };
-  return <div className="p-8 h-full flex flex-col"><h2 className="text-3xl font-extrabold mb-8">앨범 ({ps.length})</h2><div className="grid grid-cols-3 gap-4">{ps.map(p=><div key={p.id} onClick={()=>setM(p)} className="aspect-square bg-white border rounded-xl overflow-hidden cursor-pointer"><img src={p.url} className="w-full h-full object-contain"/></div>)}</div><button onClick={()=>setM('up')} className="fixed bottom-8 right-8 w-16 h-16 bg-pink-500 text-white rounded-full shadow-2xl flex items-center justify-center"><Plus size={32}/></button>{m==='up'&&<UI.Modal onClose={()=>setM(null)} title="업로드"><PhotoUp onSave={add}/></UI.Modal>}{m&&m!=='up'&&<UI.Modal onClose={()=>setM(null)} maxWidth="max-w-4xl"><div className="flex h-[80vh]"><img src={m.url} className="w-3/5 object-contain bg-black"/><div className="w-2/5 bg-white p-4 border-l"><div className="font-bold border-b pb-2">{m.caption}</div><div className="mt-4 text-gray-400 text-sm">댓글 기능 준비중</div><button onClick={()=>{setPs(ps.filter(x=>x.id!==m.id)); setM(null)}} className="mt-4 text-red-500 text-sm">삭제</button></div></div></UI.Modal>}</div>;
-}
-
-const PhotoUp = ({ onSave }) => {
-  const [i, setI] = useState(null); const [c, setC] = useState(''); const r = useRef();
-  return <div className="p-4"><div onClick={()=>r.current.click()} className="aspect-square bg-gray-50 rounded-xl flex items-center justify-center cursor-pointer mb-4 border-2 border-dashed">{i?<img src={i} className="max-h-full"/>:'사진 선택'}<input type="file" ref={r} onChange={e=>{const f=e.target.files[0]; if(f){const rd=new FileReader(); rd.onloadend=()=>setI(rd.result); rd.readAsDataURL(f)}}} className="hidden"/></div><textarea value={c} onChange={e=>setC(e.target.value)} className="w-full p-2 border rounded-xl" placeholder="설명"/><UI.Btn className="w-full mt-4" onClick={()=>i&&onSave({url:i, caption:c})}>등록</UI.Btn></div>;
-};
-
-function TodoListModal({ onClose }) {
-  const [todos, setTodos] = usePersistentState('teacher_todos', []); const [t, setT] = useState('');
-  return <UI.Modal onClose={onClose} title="할 일"><div className="p-4 h-[50vh] flex flex-col"><div className="flex gap-2 mb-4"><input value={t} onChange={e=>setT(e.target.value)} className="flex-1 p-2 border rounded-lg"/><UI.Btn onClick={()=>{if(t){setTodos([...todos,{id:Date.now(),text:t,done:false}]);setT('')}}} className="px-4 py-2">추가</UI.Btn></div><div className="flex-1 overflow-y-auto space-y-2">{todos.map(i=><div key={i.id} className="flex gap-2 items-center p-2 border rounded"><input type="checkbox" checked={i.done} onChange={()=>setTodos(todos.map(x=>x.id===i.id?{...x,done:!x.done}:x))}/><span className={i.done?'line-through text-gray-400':''}>{i.text}</span><button onClick={()=>setTodos(todos.filter(x=>x.id!==i.id))} className="ml-auto text-red-400"><X size={14}/></button></div>)}</div></div></UI.Modal>;
 }
 
 function RecoveryModal({ securityData, onClose, onSuccess, onError }) {
