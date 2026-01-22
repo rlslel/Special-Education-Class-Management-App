@@ -3,7 +3,7 @@ import {
   Camera, X, User, Plus, Lock, Calendar, GraduationCap, Image, Settings, Home, 
   Trash2, Check, Users, Briefcase, Wand2, RefreshCcw, Edit2, Download, Upload, 
   Database, AlertTriangle, BookOpen, Coins, Clock, Link as LinkIcon, RotateCcw,
-  ChevronLeft, ChevronRight, MoreHorizontal, MapPin
+  ChevronLeft, ChevronRight, MoreHorizontal, MapPin, AlignLeft, CheckSquare, Link
 } from 'lucide-react';
 
 // =================================================================================
@@ -13,7 +13,7 @@ import {
 const TARGET_SUBJECTS = ['📕 국어', '📐 수학', '🌏 사회', '⚗️ 과학', '⚖️ 도덕', '🅰️ 영어', '🏃 체육', '🎵 음악', '🎨 미술', '💻 실과', '🍳 요리', '✨ 특색'];
 const DEFAULT_AVATARS = Array.from({ length: 6 }, (_, i) => `/default-avatars/avatar${i + 1}.png`);
 const SECURITY_QUESTIONS = ['보물 1호는?', '추억의 장소는?', '좋아하는 음식은?', '직접 입력'];
-const STORAGE_KEYS = ['app_password', 'app_security', 'students_data', 'staff_data', 'integrated_schedule', 'class_photos', 'teacher_todos', 'service_records', 'budget_definitions', 'grade_timetables', 'teacher_schedules', 'class_status_memo'];
+const STORAGE_KEYS = ['app_password', 'app_security', 'students_data', 'staff_data', 'integrated_schedule', 'class_photos', 'teacher_todos', 'service_records', 'budget_definitions', 'grade_timetables', 'teacher_schedules', 'class_status_memo', 'google_api_key', 'gas_app_url'];
 const COLORS = ['red','orange','amber','green','emerald','teal','cyan','blue','indigo','violet','purple','fuchsia','pink','rose'];
 const getStudentColor = (id) => { const c = COLORS[id % COLORS.length]; return `bg-${c}-100 border-${c}-200 text-${c}-800`; };
 
@@ -47,7 +47,7 @@ const callGemini = async (apiKey, prompt, retries = 3) => {
 };
 
 // =================================================================================
-// [2] UI 컴포넌트 (디자인 유지 + 한글 입력 최적화)
+// [2] UI 컴포넌트
 // =================================================================================
 
 const UI = {
@@ -159,7 +159,6 @@ function MainLayout({ storedPw, showGlobalError }) {
   const [staff, setStaff] = usePersistentState('staff_data', []);
   const [secCheck, setSecCheck] = useState({ open: false, target: null, input: '' });
 
-  // [수정사항 1] 순서 변경 및 대시보드 -> 홈
   const MENU_ITEMS = [
     { id: 'home', label: '홈', icon: Home },
     { id: 'students', label: '학생관리', icon: User, protected: true },
@@ -175,7 +174,6 @@ function MainLayout({ storedPw, showGlobalError }) {
   const verify = (e) => { e.preventDefault(); if (secCheck.input === storedPw) { setMenu(secCheck.target); setSecCheck({ ...secCheck, open: false }); } else showGlobalError('비밀번호 불일치'); };
 
   const commonProps = { students, setStudents, staff, setStaff, showGlobalError };
-  // Dashboard -> Home으로 변경
   const Page = { home: HomeManager, students: StudentManager, personnel: PersonnelManager, budget: BudgetManager, schedule: ScheduleManager, education: EducationManager, photos: PhotoManager, settings: SettingsPage }[menu] || HomeManager;
 
   return (
@@ -199,100 +197,136 @@ function MainLayout({ storedPw, showGlobalError }) {
 }
 
 // =================================================================================
-// [5] 홈 (구 대시보드 - 전면 개편)
+// [5] 홈 (NEW: 그라데이션 플래너 & 스티커 메모)
 // =================================================================================
 
 function HomeManager() {
+  // 데이터 상태 관리
   const [schedules, setSchedules] = usePersistentState('teacher_schedules', {});
-  const [todos, setTodos] = usePersistentState('teacher_todos', []);
-  const [classMemo, setClassMemo] = usePersistentState('class_status_memo', '');
+  const [todos, setTodos] = usePersistentState('teacher_todos_date_v2', {}); // 날짜별 투두로 변경 (키 변경)
+  const [memos, setMemos] = usePersistentState('class_sticky_memos', []); // 포스트잇 배열
   
+  // UI 상태 관리
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(null); // 일정 추가용 모달
-  const [todoInput, setTodoInput] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [inputText, setInputText] = useState('');
+  const [inputType, setInputType] = useState('schedule'); // schedule, todo, memo
+  
+  // 색상 팔레트 (User Provided)
+  const PALETTE = {
+    blue: '#405DE6',
+    royal: '#5B51D8',
+    purple: '#833AB4',
+    magenta: '#C13584',
+    pink: '#E1306C',
+    red: '#FD1D1D',
+    orangeRed: '#F56040',
+    orange: '#F77737', // 약간 수정 (가독성)
+    yellowOrange: '#FCAF45',
+    yellow: '#FFDC80'
+  };
 
-  // 달력 계산 로직
+  // 날짜 관련 유틸
+  const dateString = (date) => date ? date.toISOString().slice(0, 10) : '';
+  const isSameDay = (d1, d2) => d1 && d2 && d1.toDateString() === d2.toDateString();
   const getCalendarDays = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const lastDate = new Date(year, month + 1, 0).getDate();
     const days = [];
-    
-    for (let i = 0; i < firstDay; i++) days.push(null); // 빈칸
+    for (let i = 0; i < firstDay; i++) days.push(null);
     for (let i = 1; i <= lastDate; i++) days.push(new Date(year, month, i));
     return days;
   };
 
-  const moveMonth = (delta) => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + delta, 1));
-  };
-
-  const handleAddSchedule = (title, type = 'default') => {
-    const dateStr = selectedDate.toISOString().slice(0, 10);
-    const newSchedule = { id: Date.now(), title, type };
-    setSchedules(prev => ({
-      ...prev,
-      [dateStr]: [...(prev[dateStr] || []), newSchedule]
-    }));
-    setSelectedDate(null);
-  };
-
-  const deleteSchedule = (dateStr, id) => {
-    setSchedules(prev => ({
-      ...prev,
-      [dateStr]: prev[dateStr].filter(s => s.id !== id)
-    }));
-  };
-
-  const addTodo = (e) => {
+  // 통합 입력 핸들러
+  const handleAdd = (e) => {
     e.preventDefault();
-    if (!todoInput.trim()) return;
-    setTodos([...todos, { id: Date.now(), text: todoInput, done: false }]);
-    setTodoInput('');
+    if (!inputText.trim()) return;
+
+    if (inputType === 'memo') {
+      // 스티커 메모 추가 (날짜 무관, 랜덤 회전각)
+      const rotation = Math.random() * 4 - 2; // -2도 ~ +2도 회전
+      setMemos([...memos, { id: Date.now(), text: inputText, rotation }]);
+    } else {
+      // 일정 & 할 일 (날짜 종속)
+      const key = dateString(selectedDate);
+      const newItem = { id: Date.now(), text: inputText, done: false }; // 통일된 구조
+      
+      if (inputType === 'schedule') {
+        setSchedules({ ...schedules, [key]: [...(schedules[key] || []), { id: Date.now(), title: inputText }] });
+      } else {
+        setTodos({ ...todos, [key]: [...(todos[key] || []), newItem] });
+      }
+    }
+    setInputText('');
   };
 
-  const dateString = (date) => date ? date.toISOString().slice(0, 10) : '';
+  // 삭제 핸들러
+  const deleteItem = (type, id) => {
+    const key = dateString(selectedDate);
+    if (type === 'schedule') {
+      setSchedules({ ...schedules, [key]: schedules[key].filter(s => s.id !== id) });
+    } else if (type === 'todo') {
+      setTodos({ ...todos, [key]: todos[key].filter(t => t.id !== id) });
+    } else if (type === 'memo') {
+      setMemos(memos.filter(m => m.id !== id));
+    }
+  };
+
+  // 할 일 토글
+  const toggleTodo = (id) => {
+    const key = dateString(selectedDate);
+    const newTodos = todos[key].map(t => t.id === id ? { ...t, done: !t.done } : t);
+    setTodos({ ...todos, [key]: newTodos });
+  };
 
   return (
-    <div className="p-8 h-full flex flex-col gap-6 overflow-y-auto">
-      {/* 1. 상단: 날짜 및 타이틀 */}
-      <div className="flex justify-between items-center shrink-0">
-        <div>
-          <h2 className="text-3xl font-extrabold text-gray-800">나의 교무 수첩</h2>
-          <p className="text-gray-500 text-sm mt-1">{new Date().toLocaleDateString()} 오늘 하루도 힘내세요! 💪</p>
-        </div>
-        <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-xl shadow-sm border">
-          <button onClick={() => moveMonth(-1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronLeft/></button>
-          <span className="text-xl font-bold w-32 text-center">{currentDate.getFullYear()}. {currentDate.getMonth() + 1}</span>
-          <button onClick={() => moveMonth(1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronRight/></button>
-        </div>
-      </div>
-
-      <div className="flex-1 flex gap-6 min-h-0">
-        {/* 2. 좌측: 캘린더 (메인) */}
-        <div className="flex-1 bg-white rounded-[2rem] shadow-lg border border-gray-100 p-6 flex flex-col">
-          <div className="grid grid-cols-7 mb-4 text-center font-bold text-gray-400">
-            {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
-              <div key={d} className={i === 0 ? 'text-red-400' : (i === 6 ? 'text-blue-400' : '')}>{d}</div>
-            ))}
+    <div className="p-6 h-full flex flex-col items-center justify-center bg-gray-50">
+      <div className="w-full max-w-7xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col md:flex-row h-[90vh] border border-white relative">
+        
+        {/* =================================================================================
+            [좌측] 캘린더 영역 (35%) 
+           ================================================================================= */}
+        <div className="md:w-[35%] bg-white p-8 flex flex-col border-r border-gray-100 z-10">
+          <div className="flex justify-between items-center mb-8 px-2">
+            <h2 className="text-3xl font-light" style={{ color: PALETTE.purple }}>
+              {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][currentDate.getMonth()]}
+              <span className="text-gray-300 font-bold text-lg ml-2">{currentDate.getFullYear()}</span>
+            </h2>
+            <div className="flex gap-1">
+              <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))} className="p-2 hover:bg-gray-100 rounded-full text-gray-400"><ChevronLeft/></button>
+              <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))} className="p-2 hover:bg-gray-100 rounded-full text-gray-400"><ChevronRight/></button>
+            </div>
           </div>
-          <div className="flex-1 grid grid-cols-7 grid-rows-5 gap-2">
-            {getCalendarDays().map((date, idx) => {
-              if (!date) return <div key={idx} className="bg-gray-50/50 rounded-xl" />;
+
+          <div className="grid grid-cols-7 text-center mb-4">
+            {['S','M','T','W','T','F','S'].map((d,i) => <div key={i} className="text-xs font-bold text-gray-300">{d}</div>)}
+          </div>
+
+          <div className="flex-1 grid grid-cols-7 grid-rows-6 gap-2">
+            {getCalendarDays().map((date, i) => {
+              if (!date) return <div key={i} />;
               const dStr = dateString(date);
-              const daySchedules = schedules[dStr] || [];
-              const isToday = dStr === new Date().toISOString().slice(0, 10);
-              
+              const isSel = isSameDay(date, selectedDate);
+              const isToday = isSameDay(date, new Date());
+              // 일정/할일 존재 여부 체크
+              const hasSch = (schedules[dStr] || []).length > 0;
+              const hasTodo = (todos[dStr] || []).length > 0;
+
               return (
-                <div key={idx} onClick={() => setSelectedDate(date)} className={`relative p-2 rounded-xl border transition-all cursor-pointer hover:border-pink-300 hover:shadow-md flex flex-col gap-1 ${isToday ? 'bg-pink-50 border-pink-200' : 'bg-white border-gray-100'}`}>
-                  <span className={`text-sm font-bold ${date.getDay() === 0 ? 'text-red-400' : 'text-gray-600'}`}>{date.getDate()}</span>
-                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
-                    {daySchedules.map(sch => (
-                      <div key={sch.id} className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold truncate">
-                        {sch.title}
-                      </div>
-                    ))}
+                <div key={i} onClick={() => setSelectedDate(date)} className="flex flex-col items-center justify-center cursor-pointer relative group">
+                  <div 
+                    className={`w-9 h-9 flex items-center justify-center rounded-full text-sm font-bold transition-all duration-300 ${isSel ? 'text-white shadow-lg scale-110' : 'text-gray-600 group-hover:bg-gray-50'}`}
+                    style={{ background: isSel ? `linear-gradient(135deg, ${PALETTE.purple}, ${PALETTE.pink})` : (isToday ? '#F3F4F6' : 'transparent'), color: isToday && !isSel ? PALETTE.pink : '' }}
+                  >
+                    {date.getDate()}
+                  </div>
+                  {/* 인디케이터 점 */}
+                  <div className="flex gap-0.5 mt-1 h-1">
+                    {hasSch && <div className="w-1 h-1 rounded-full" style={{ backgroundColor: PALETTE.blue }}></div>}
+                    {hasTodo && <div className="w-1 h-1 rounded-full" style={{ backgroundColor: PALETTE.orangeRed }}></div>}
                   </div>
                 </div>
               );
@@ -300,66 +334,131 @@ function HomeManager() {
           </div>
         </div>
 
-        {/* 3. 우측: 사이드 위젯 (할일 & 메모) */}
-        <div className="w-80 flex flex-col gap-6 shrink-0">
-          {/* 오늘의 학급 기록 (직접 입력) */}
-          <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-yellow-100 flex flex-col h-1/3">
-            <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2"><Edit2 size={18} className="text-yellow-500"/> 오늘의 학급 기록</h3>
-            <textarea 
-              lang="ko"
-              value={classMemo} 
-              onChange={(e) => setClassMemo(e.target.value)} 
-              className="flex-1 w-full p-4 bg-yellow-50 rounded-xl border-none outline-none resize-none text-sm leading-relaxed placeholder-yellow-300/50"
-              placeholder="오늘 아이들의 특이사항이나 기억할 점을 자유롭게 기록하세요."
-            />
+        {/* =================================================================================
+            [우측] 타임라인 & 스티커 메모 (65%) 
+           ================================================================================= */}
+        <div className="flex-1 flex flex-col relative overflow-hidden bg-white">
+          
+          {/* 1. 상단 헤더 & 입력창 */}
+          <div className="p-8 pb-4 shrink-0 z-20 bg-white/80 backdrop-blur-md">
+            <div className="flex justify-between items-end mb-6">
+              <div>
+                <p className="text-xs font-bold tracking-widest uppercase mb-1" style={{ color: PALETTE.blue }}>Daily Plan</p>
+                <h2 className="text-4xl font-extrabold text-gray-800">
+                  {selectedDate.getDate()} <span className="text-xl font-medium text-gray-400">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][selectedDate.getDay()]}</span>
+                </h2>
+              </div>
+              {/* 입력 모드 선택 탭 */}
+              <div className="flex bg-gray-100 p-1 rounded-xl">
+                {[
+                  { id: 'schedule', icon: Clock, color: PALETTE.blue, label: '일정' },
+                  { id: 'todo', icon: CheckSquare, color: PALETTE.red, label: '할일' },
+                  { id: 'memo', icon: Edit2, color: PALETTE.yellowOrange, label: '메모' }
+                ].map(mode => (
+                  <button key={mode.id} onClick={() => setInputType(mode.id)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${inputType === mode.id ? 'bg-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`} style={{ color: inputType === mode.id ? mode.color : '' }}>
+                    <mode.icon size={14}/> {mode.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 통합 입력바 */}
+            <form onSubmit={handleAdd} className="relative group shadow-sm rounded-2xl">
+              <input 
+                lang="ko"
+                value={inputText}
+                onChange={e => setInputText(e.target.value)}
+                className="w-full bg-gray-50 pl-5 pr-16 py-4 rounded-2xl border-2 border-transparent outline-none transition-all placeholder-gray-400 text-gray-700 font-medium"
+                style={{ borderColor: inputType === 'schedule' ? `${PALETTE.blue}20` : inputType === 'todo' ? `${PALETTE.red}20` : `${PALETTE.yellowOrange}40` }}
+                placeholder={inputType === 'memo' ? "잊지 말아야 할 내용을 적어두세요 (스티커 메모)" : inputType === 'schedule' ? "새로운 일정을 입력하세요" : "오늘 할 일을 입력하세요"}
+              />
+              <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl text-white transition-transform hover:scale-105 active:scale-95" style={{ background: inputType === 'memo' ? PALETTE.yellowOrange : inputType === 'schedule' ? PALETTE.blue : PALETTE.red }}>
+                <Plus size={18}/>
+              </button>
+            </form>
           </div>
 
-          {/* 오늘의 할 일 */}
-          <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-purple-100 flex-1 flex flex-col">
-            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Check size={18} className="text-purple-500"/> 오늘의 할 일</h3>
-            <form onSubmit={addTodo} className="flex gap-2 mb-4">
-              <input lang="ko" value={todoInput} onChange={e => setTodoInput(e.target.value)} className="flex-1 bg-gray-50 px-3 py-2 rounded-xl text-sm outline-none border focus:border-purple-300" placeholder="할 일 입력" />
-              <button type="submit" className="bg-purple-500 text-white p-2 rounded-xl"><Plus size={18}/></button>
-            </form>
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
-              {todos.length > 0 ? todos.map(t => (
-                <div key={t.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl group">
-                  <button onClick={() => setTodos(todos.map(x => x.id === t.id ? { ...x, done: !x.done } : x))} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${t.done ? 'bg-purple-500 border-purple-500' : 'border-gray-300'}`}>
-                    {t.done && <Check size={12} className="text-white"/>}
-                  </button>
-                  <span className={`flex-1 text-sm ${t.done ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{t.text}</span>
-                  <button onClick={() => setTodos(todos.filter(x => x.id !== t.id))} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><X size={16}/></button>
-                </div>
-              )) : <div className="text-center text-gray-400 text-xs py-10">등록된 할 일이 없습니다.</div>}
+          {/* 2. 메인 스크롤 영역 (일정 -> 할일 -> 메모장 순) */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-8 pb-10">
+            
+            {/* 섹션 1: 일정 (Schedule) */}
+            <div className="mb-8">
+              <h4 className="text-xs font-bold text-gray-400 mb-3 flex items-center gap-2 uppercase tracking-wider"><div className="w-1.5 h-1.5 rounded-full" style={{background: PALETTE.blue}}></div> Schedule</h4>
+              <div className="space-y-3">
+                {(schedules[dateString(selectedDate)] || []).map((sch, i) => (
+                  <div key={sch.id} className="flex items-center gap-4 group animate-fade-in-up" style={{animationDelay: `${i*0.05}s`}}>
+                    <div className="w-1 h-full min-h-[3rem] rounded-full" style={{ background: `linear-gradient(to bottom, ${PALETTE.blue}, ${PALETTE.royal})` }}></div>
+                    <div className="flex-1 bg-white border border-gray-100 p-4 rounded-2xl shadow-sm flex justify-between items-center hover:shadow-md transition-all">
+                      <span className="font-bold text-gray-700">{sch.title}</span>
+                      <button onClick={() => deleteItem('schedule', sch.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
+                    </div>
+                  </div>
+                ))}
+                {(schedules[dateString(selectedDate)] || []).length === 0 && <div className="text-gray-300 text-xs italic pl-4">등록된 일정이 없습니다.</div>}
+              </div>
             </div>
+
+            {/* 섹션 2: 할 일 (To-Do) */}
+            <div className="mb-8">
+              <h4 className="text-xs font-bold text-gray-400 mb-3 flex items-center gap-2 uppercase tracking-wider"><div className="w-1.5 h-1.5 rounded-full" style={{background: PALETTE.red}}></div> To-Do List</h4>
+              <div className="space-y-3">
+                {(todos[dateString(selectedDate)] || []).map((todo, i) => (
+                  <div key={todo.id} className="flex items-center gap-4 group animate-fade-in-up" style={{animationDelay: `${i*0.05}s`}}>
+                    <div className="w-1 h-full min-h-[3rem] rounded-full transition-colors" style={{ background: todo.done ? '#E5E7EB' : `linear-gradient(to bottom, ${PALETTE.red}, ${PALETTE.yellowOrange})` }}></div>
+                    <div className={`flex-1 p-4 rounded-2xl border flex justify-between items-center transition-all ${todo.done ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-100 shadow-sm hover:shadow-md'}`}>
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => toggleTodo(todo.id)} className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${todo.done ? 'border-gray-300 bg-gray-300 text-white' : 'border-red-200 text-transparent hover:border-red-400'}`} style={!todo.done ? {borderColor: PALETTE.orange} : {}}>
+                          <Check size={12} strokeWidth={4} />
+                        </button>
+                        <span className={`font-bold transition-all ${todo.done ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{todo.text}</span>
+                      </div>
+                      <button onClick={() => deleteItem('todo', todo.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
+                    </div>
+                  </div>
+                ))}
+                {(todos[dateString(selectedDate)] || []).length === 0 && <div className="text-gray-300 text-xs italic pl-4">등록된 할 일이 없습니다.</div>}
+              </div>
+            </div>
+
+            {/* 섹션 3: 스티커 메모 (Sticky Notes) */}
+            <div className="pt-6 border-t border-dashed border-gray-200">
+              <h4 className="text-xs font-bold text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                <div className="w-1.5 h-1.5 rounded-full" style={{background: PALETTE.yellowOrange}}></div> Sticky Notes (Always Visible)
+              </h4>
+              
+              {/* 가로 스크롤 가능한 메모 영역 */}
+              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar min-h-[160px]">
+                {memos.length > 0 ? memos.map(memo => (
+                  <div 
+                    key={memo.id} 
+                    className="shrink-0 w-48 h-48 p-5 shadow-lg flex flex-col justify-between transition-transform hover:scale-105 hover:z-10 group"
+                    style={{ 
+                      backgroundColor: PALETTE.yellow, 
+                      transform: `rotate(${memo.rotation}deg)`,
+                      boxShadow: '4px 4px 15px rgba(0,0,0,0.1)' 
+                    }}
+                  >
+                    <p className="font-gaegu text-gray-800 text-sm leading-relaxed whitespace-pre-wrap flex-1 overflow-hidden" style={{ fontFamily: 'sans-serif' }}>{memo.text}</p>
+                    <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => deleteItem('memo', memo.id)} className="p-1.5 bg-black/10 rounded-full hover:bg-black/20 text-gray-700">
+                        <X size={12}/>
+                      </button>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="w-full flex items-center justify-center border-2 border-dashed border-gray-200 rounded-2xl text-gray-300 text-sm h-32">
+                    '메모' 탭에서 입력하면 여기에 붙어요! 📌
+                  </div>
+                )}
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
-
-      {/* 일정 추가 모달 */}
-      {selectedDate && (
-        <UI.Modal onClose={() => setSelectedDate(null)} title={`${selectedDate.getMonth()+1}월 ${selectedDate.getDate()}일 일정`} maxWidth="max-w-sm">
-          <div className="p-6">
-            <div className="space-y-2 mb-6 max-h-40 overflow-y-auto">
-              {(schedules[dateString(selectedDate)] || []).map(s => (
-                <div key={s.id} className="flex justify-between items-center p-2 bg-gray-50 rounded-lg text-sm">
-                  <span>{s.title}</span>
-                  <button onClick={() => deleteSchedule(dateString(selectedDate), s.id)} className="text-gray-400 hover:text-red-500"><X size={14}/></button>
-                </div>
-              ))}
-              {(schedules[dateString(selectedDate)] || []).length === 0 && <p className="text-gray-400 text-center text-xs">일정이 없습니다.</p>}
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); handleAddSchedule(e.target.title.value); }}>
-              <UI.Input name="title" placeholder="새 일정 입력 (예: 회의)" className="mb-2" autoFocus />
-              <UI.Btn type="submit" className="w-full bg-blue-500 text-white">추가하기</UI.Btn>
-            </form>
-          </div>
-        </UI.Modal>
-      )}
     </div>
   );
 }
-
 // =================================================================================
 // [6] 학생 관리
 // =================================================================================
@@ -471,7 +570,7 @@ function ScheduleManager({ students, staff }) {
 
 // [9] 예산 관리
 function BudgetManager() {
-  const GAS_URL = "https://script.google.com/macros/s/AKfycbwPGP3XD0UiXgBirn2vu9N0lzD_-0wOrJJuVaiA5MhSoHylwoYrEzH8G_Xu_5nHTjpo/exec"; 
+  const [gasUrl] = usePersistentState('gas_app_url', '');
   const [items, setItems] = useState([]); const [budgets, setBudgets] = usePersistentState('budget_definitions', [{ id: 'default', name: '학급운영비', total: 300000 }]);
   const [activeTab, setActiveTab] = useState(budgets[0]?.name || ''); const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState(null); const [confirm, setConfirm] = useState(null);
@@ -481,20 +580,20 @@ function BudgetManager() {
     const used = items.filter(i => i.category === activeTab).reduce((acc, cur) => acc + Number(cur.amount), 0);
     return { total, used, remain: total - used };
   }, [items, budgets, activeTab]);
-  const fetchData = async () => { setLoading(true); const data = await callGAS(GAS_URL); if(data) setItems(data.budget || []); setLoading(false); };
+  const fetchData = async () => { setLoading(true); const data = await callGAS(gasUrl); if(data) setItems(data.budget || []); setLoading(false); };
   const saveItem = async (form) => {
     setLoading(true); const newItem = form.id ? form : { ...form, id: Date.now() };
     if (form.id) setItems(items.map(i => i.id === form.id ? newItem : i)); else setItems([newItem, ...items]); setModal(null);
-    await callGAS(GAS_URL, { type: 'budget', ...newItem }); setLoading(false);
+    await callGAS(gasUrl, { type: 'budget', ...newItem }); setLoading(false);
   };
   const executeDelete = async () => {
     if (confirm.type === 'item') {
       const id = confirm.data.id; setLoading(true); setItems(items.filter(i => i.id !== id)); setConfirm(null);
-      await callGAS(GAS_URL, { type: 'budget', action: 'delete', id }); setLoading(false);
+      await callGAS(gasUrl, { type: 'budget', action: 'delete', id }); setLoading(false);
     } else if (confirm.type === 'budget') { const nb = budgets.filter(b => b.name !== activeTab); setBudgets(nb); setActiveTab(nb[0].name); setConfirm(null); }
   };
   const saveBudget = (nb) => { if (budgets.some(b => b.name === nb.name)) return alert("중복된 이름"); setBudgets([...budgets, { ...nb, id: Date.now() }]); setActiveTab(nb.name); setModal(null); };
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [gasUrl]);
   const fmt = (n) => new Intl.NumberFormat('ko-KR').format(n); const filtered = items.filter(i => i.category === activeTab);
 
   return (
@@ -520,14 +619,14 @@ function BudgetForm({ activeTab, initialData, onSave, onClose }) {
 
 // [10] 개별화 교육 (IEP)
 function EducationManager({ students }) {
-  const GAS_URL = "여기에_배포된_웹앱_URL을_붙여넣으세요";
+  const [gasUrl] = usePersistentState('gas_app_url', '');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [iepData, setIepData] = useState({}); const [meetingList, setMeetingList] = useState([]); const [loading, setLoading] = useState(false); const [confirm, setConfirm] = useState(null);
-  const fetchData = async () => { setLoading(true); const data = await callGAS(GAS_URL); if(data) { const f = {}; (data.iep||[]).forEach(r => f[`${r.studentId}_${r.month}`] = r); setIepData(f); setMeetingList(data.meetings || []); } setLoading(false); };
-  useEffect(() => { fetchData(); }, []);
-  const saveDaily = async (studentId, month, record) => { setLoading(true); setIepData(p => ({ ...p, [`${studentId}_${month}`]: record })); await callGAS(GAS_URL, { type: 'iep', studentId, month, ...record }); setLoading(false); };
-  const saveMeeting = async (mData) => { setLoading(true); const nM = mData.id ? mData : { ...mData, id: Date.now() }; setMeetingList(mData.id ? meetingList.map(m => m.id === mData.id ? nM : m) : [nM, ...meetingList]); await callGAS(GAS_URL, { type: 'iep_meeting', ...nM }); setLoading(false); };
-  const executeDelete = async () => { const id = confirm.id; setLoading(true); setMeetingList(meetingList.filter(m => m.id !== id)); setConfirm(null); await callGAS(GAS_URL, { type: 'iep_meeting', action: 'delete', id }); setLoading(false); };
+  const fetchData = async () => { setLoading(true); const data = await callGAS(gasUrl); if(data) { const f = {}; (data.iep||[]).forEach(r => f[`${r.studentId}_${r.month}`] = r); setIepData(f); setMeetingList(data.meetings || []); } setLoading(false); };
+  useEffect(() => { fetchData(); }, [gasUrl]);
+  const saveDaily = async (studentId, month, record) => { setLoading(true); setIepData(p => ({ ...p, [`${studentId}_${month}`]: record })); await callGAS(gasUrl, { type: 'iep', studentId, month, ...record }); setLoading(false); };
+  const saveMeeting = async (mData) => { setLoading(true); const nM = mData.id ? mData : { ...mData, id: Date.now() }; setMeetingList(mData.id ? meetingList.map(m => m.id === mData.id ? nM : m) : [nM, ...meetingList]); await callGAS(gasUrl, { type: 'iep_meeting', ...nM }); setLoading(false); };
+  const executeDelete = async () => { const id = confirm.id; setLoading(true); setMeetingList(meetingList.filter(m => m.id !== id)); setConfirm(null); await callGAS(gasUrl, { type: 'iep_meeting', action: 'delete', id }); setLoading(false); };
 
   return (
     <div className="p-8 max-w-7xl mx-auto"><div className="flex justify-between items-center mb-8"><h2 className="text-3xl font-extrabold text-gray-800">개별화 교육 계획 (IEP)</h2><button onClick={fetchData} className={`p-2.5 rounded-full bg-white border shadow hover:bg-gray-50 ${loading ? 'animate-spin' : ''}`}><RefreshCcw size={20} className="text-gray-600"/></button></div>
@@ -573,12 +672,35 @@ function IEPMeetingForm({ student, initialData, onSave, onCancel }) {
 
 // [11] 설정 및 기타
 function SettingsPage({ storedPw, setStoredPw, security, setSecurity, showGlobalError }) {
-  const [apiKey, setApiKey] = usePersistentState('google_api_key', ''); const [showKey, setShowKey] = useState(false); const r = useRef();
-  const backup = () => { const d = STORAGE_KEYS.reduce((a, k) => ({ ...a, [k]: localStorage.getItem(k) }), {}); delete d['google_api_key']; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d)], {type:'json'})); a.download = `teacher_manager_backup_${new Date().toISOString().slice(0,10)}.json`; a.click(); };
+  const [apiKey, setApiKey] = usePersistentState('google_api_key', ''); 
+  const [gasUrl, setGasUrl] = usePersistentState('gas_app_url', ''); // GAS URL 추가
+  const [showKey, setShowKey] = useState(false); const r = useRef();
+  
+  const backup = () => { 
+    const d = STORAGE_KEYS.reduce((a, k) => ({ ...a, [k]: localStorage.getItem(k) }), {}); 
+    delete d['google_api_key']; delete d['gas_app_url']; // 키와 URL은 백업 제외
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d)], {type:'json'})); a.download = `teacher_manager_backup_${new Date().toISOString().slice(0,10)}.json`; a.click(); 
+  };
+  
   const restore = (e) => { const rd = new FileReader(); rd.onload = (ev) => { try { const d = JSON.parse(ev.target.result); STORAGE_KEYS.forEach(k => { if(d[k]) localStorage.setItem(k, d[k]) }); alert('데이터가 성공적으로 복구되었습니다.'); window.location.reload(); } catch { showGlobalError('올바르지 않은 백업 파일입니다.'); } }; if(e.target.files[0]) rd.readAsText(e.target.files[0]); };
+  
   return (
     <div className="p-8 max-w-2xl mx-auto"><h2 className="text-3xl font-extrabold mb-8 text-gray-800">환경 설정</h2><div className="space-y-6">
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100"><div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600"><Wand2 size={18}/></div><h3 className="font-bold text-lg text-gray-800">AI 기능 설정 (Google Gemini)</h3></div><div className="bg-blue-50 p-4 rounded-xl text-xs text-blue-700 mb-4 leading-relaxed"><b>🔑 본인의 Google API Key를 입력해주세요.</b><br/> 키는 서버로 전송되지 않고, 선생님의 브라우저에만 안전하게 저장됩니다.<br/> (AI Studio에서 발급받은 키를 사용하세요.)</div><div className="relative"><input type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="w-full p-4 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 font-mono text-sm" placeholder="AIzaSy..." /><button onClick={() => setShowKey(!showKey)} className="absolute right-4 top-4 text-gray-400 hover:text-blue-600">{showKey ? <User size={18}/> : <Lock size={18}/>}</button></div></div>
+      
+      {/* API Key 설정 */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+        <div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600"><Wand2 size={18}/></div><h3 className="font-bold text-lg text-gray-800">Google AI Key</h3></div>
+        <div className="relative"><input type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="w-full p-4 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-400 font-mono text-sm" placeholder="AIzaSy..." /><button onClick={() => setShowKey(!showKey)} className="absolute right-4 top-4 text-gray-400 hover:text-blue-600">{showKey ? <User size={18}/> : <Lock size={18}/>}</button></div>
+      </div>
+
+      {/* GAS URL 설정 (추가됨) */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-green-100">
+        <div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center text-green-600"><LinkIcon size={18}/></div><h3 className="font-bold text-lg text-gray-800">Google Apps Script URL</h3></div>
+        <div className="bg-green-50 p-4 rounded-xl text-xs text-green-700 mb-4 leading-relaxed"><b>🔗 배포된 웹앱 URL을 입력해주세요.</b><br/> 예산 관리와 IEP 데이터가 이 주소의 시트로 저장됩니다.</div>
+        <input type="text" value={gasUrl} onChange={(e) => setGasUrl(e.target.value)} className="w-full p-4 bg-white border border-green-200 rounded-xl outline-none focus:ring-2 focus:ring-green-400 font-mono text-sm" placeholder="https://script.google.com/macros/s/..." />
+      </div>
+
+      {/* 데이터 관리 */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100"><div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-600"><Database size={18}/></div><h3 className="font-bold text-lg text-gray-800">데이터 백업 및 복구</h3></div><div className="flex gap-4"><button onClick={backup} className="flex-1 p-4 bg-gray-50 text-gray-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors"><Download size={20}/> 백업 파일 다운로드</button><button onClick={() => r.current.click()} className="flex-1 p-4 bg-green-50 text-green-600 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-100 transition-colors"><Upload size={20}/> 백업 파일 불러오기</button><input type="file" ref={r} onChange={restore} className="hidden" accept=".json"/></div><div className="mt-6 pt-4 border-t"><button onClick={() => { if(confirm('정말 초기화하시겠습니까?')) { localStorage.clear(); window.location.reload(); }}} className="w-full py-3 text-red-400 text-sm font-bold hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-2"><Trash2 size={16}/> 앱 초기화</button></div></div></div></div>
   );
 }
