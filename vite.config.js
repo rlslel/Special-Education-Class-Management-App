@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react' // @vitejs/react-react에서 수정됨!
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: "/Special-Education-Class-Management-App/",  // <--- 이 부분을 꼭 추가하세요! (앞뒤로 슬래시 / 필수)
+  base: '/Special-Education-Class-Management-App/', // 바뀐 저장소 이름 반영
 })
