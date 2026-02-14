@@ -1,96 +1,155 @@
-import React, { useState, useRef } from 'react';
-import { Plus, Check, X, Trash2, Camera, BookOpen } from 'lucide-react';
-import { DEFAULT_AVATARS, TARGET_SUBJECTS, PASTEL_COLORS } from '../utils/helpers';
+import React, { useState } from 'react';
+import { Plus, Edit2, Trash2, User, BookOpen } from 'lucide-react';
 import { UI, ConfirmModal } from '../components/SharedUI';
+import { TARGET_SUBJECTS, DEFAULT_AVATARS, PASTEL_COLORS } from '../utils/helpers';
 
-export default function StudentManager({ students, setStudents }) {
-  const [modal, setModal] = useState(null); 
-  const [confirmModal, setConfirmModal] = useState({ open: false, id: null });
-  
-  const save = (data) => { 
-    setStudents(modal.type === 'add' 
-      ? [...students, { ...data, id: Date.now(), photo: DEFAULT_AVATARS[students.length % 6] }] 
-      : students.map(s => s.id === data.id ? data : s)); 
-    setModal({ type: 'success' }); 
+export default function StudentManager({ students, setStudents, showGlobalError }) {
+  const [modal, setModal] = useState({ open: false, data: null });
+  const [confirm, setConfirm] = useState(null);
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    const data = modal.data;
+    if (!data.name) return showGlobalError('이름을 입력하세요.');
+    
+    if (data.id) {
+      setStudents(students.map(s => s.id === data.id ? data : s));
+    } else {
+      setStudents([...students, { ...data, id: Date.now() }]);
+    }
+    setModal({ open: false, data: null });
   };
-  
+
+  const toggleSubject = (subj) => {
+    const ts = modal.data.targetSubjects || [];
+    const sh = modal.data.subjectHours || {};
+    if (ts.includes(subj)) {
+      const newTs = ts.filter(s => s !== subj);
+      const newSh = { ...sh };
+      delete newSh[subj];
+      setModal({ ...modal, data: { ...modal.data, targetSubjects: newTs, subjectHours: newSh } });
+    } else {
+      setModal({ ...modal, data: { ...modal.data, targetSubjects: [...ts, subj], subjectHours: { ...sh, [subj]: 1 } } });
+    }
+  };
+
+  const updateHours = (subj, hours) => {
+    setModal({ ...modal, data: { ...modal.data, subjectHours: { ...(modal.data.subjectHours || {}), [subj]: Number(hours) } } });
+  };
+
+  const openAdd = () => setModal({ open: true, data: { name: '', grade: 1, classNumber: 1, severity: 1, targetSubjects: [], subjectHours: {}, themeColor: PASTEL_COLORS[0], photo: DEFAULT_AVATARS[0] } });
+
   return (
-    <div className="p-8 max-w-7xl mx-auto"><div className="flex justify-between items-center mb-8"><h2 className="text-3xl font-extrabold text-gray-800">학생 관리</h2><UI.Btn onClick={() => setModal({ type: 'add' })} className="bg-gray-800 px-6 rounded-full"><Plus size={20}/> 학생 등록</UI.Btn></div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-        {students.map(s => {
-          const theme = s.themeColor || PASTEL_COLORS[s.id % 20] || PASTEL_COLORS[0];
-          const cardClass = `${theme.bg} ${theme.border} ${theme.text}`;
-          return (
-            <div key={s.id} onClick={() => setModal({ type: 'edit', data: s })} className={`cursor-pointer rounded-3xl border-4 ${cardClass} bg-white shadow-lg hover:-translate-y-2 transition-all overflow-hidden`}>
-              <div className="p-6 flex flex-col items-center">
-                <div className="w-32 h-32 rounded-full border-4 border-white shadow-md overflow-hidden bg-gray-100 mb-4 flex items-center justify-center"><img src={s.photo} className="w-full h-full object-cover"/></div>
-                <div className="px-4 py-1 rounded-full mb-4 bg-white/50 border"><h2 className="text-xl font-bold text-gray-800">{s.name}</h2></div>
-                <div className="w-full text-sm text-gray-600 space-y-1">
-                  <div className="flex justify-between"><span>성별/형태</span><b>{s.gender || '미상'} / {s.integrationType || '미정'}</b></div>
-                  <div className="flex justify-between"><span>학년/반</span><b>{s.grade}학년 {s.classNumber}반</b></div>
-                  <div className="flex justify-between"><span>중증도</span><b>{s.severity || '-'}순위</b></div>
+    <div className="p-8 h-full flex flex-col bg-gray-50/50">
+      <div className="flex justify-between items-center mb-8 shrink-0">
+        <h2 className="text-3xl font-extrabold text-gray-800 flex items-center gap-3"><User className="text-pink-500" size={32} /> 학생 관리</h2>
+        <UI.Btn onClick={openAdd} className="flex items-center gap-2 shadow-md hover:scale-105 transition-transform"><Plus size={20} /> 학생 등록</UI.Btn>
+      </div>
+
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {students.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
+            <User size={64} className="mb-4" />
+            <p className="text-lg font-bold">등록된 학생이 없습니다.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pb-8">
+            {students.map(s => (
+              <div key={s.id} className="bg-white p-6 rounded-[2rem] shadow-sm hover:shadow-lg transition-all border border-gray-100 flex flex-col group">
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-16 h-16 rounded-full p-1 shadow-inner border-2" style={{ borderColor: s.themeColor?.hex || '#ccc', backgroundColor: s.themeColor?.hex || '#f3f4f6' }}>
+                    <img src={s.photo} alt={s.name} className="w-full h-full rounded-full object-cover bg-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-extrabold text-gray-800">{s.name}</h3>
+                    <p className="text-sm font-bold text-gray-400">{s.grade}학년 {s.classNumber}반 / {s.severity}순위</p>
+                  </div>
+                  <div className="ml-auto flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setModal({ open: true, data: s })} className="p-2 bg-blue-50 text-blue-500 rounded-xl hover:bg-blue-100"><Edit2 size={16} /></button>
+                    <button onClick={() => setConfirm(s.id)} className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-100"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+                
+                <div className="mt-auto pt-4 border-t border-dashed border-gray-100">
+                  <p className="text-xs font-bold text-gray-400 mb-2 flex items-center gap-1"><BookOpen size={12}/> 개별화교육 목표 시수</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.targetSubjects?.length > 0 ? s.targetSubjects.map(subj => (
+                      <span key={subj} className="px-2.5 py-1 bg-gray-50 text-gray-600 rounded-lg text-xs font-bold border">
+                        {subj} <span className="text-pink-500 ml-1">{s.subjectHours?.[subj] || 1}시간</span>
+                      </span>
+                    )) : <span className="text-xs text-gray-300">설정된 과목이 없습니다.</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {modal.open && (
+        <UI.Modal onClose={() => setModal({ open: false, data: null })} title={modal.data.id ? '학생 정보 수정' : '새 학생 등록'} maxWidth="max-w-2xl">
+          {/* 🔥 스크롤 없이 한 화면에 들어오도록 p-4, space-y-3 등 여백과 크기를 대폭 압축했습니다! */}
+          <form onSubmit={handleSave} className="p-4 space-y-3">
+            
+            <div className="flex gap-3 items-center">
+              <div className="w-14 h-14 rounded-full bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center shrink-0 overflow-hidden">
+                <img src={modal.data.photo} className="w-full h-full object-cover"/>
+              </div>
+              <div className="flex-1 grid grid-cols-3 gap-3">
+                <UI.Input label="이름" value={modal.data.name} onChange={e => setModal({...modal, data: {...modal.data, name: e.target.value}})} required className="text-sm" />
+                <UI.Input label="학년" type="number" min="1" max="6" value={modal.data.grade} onChange={e => setModal({...modal, data: {...modal.data, grade: Number(e.target.value)}})} className="text-sm" />
+                <UI.Input label="반" type="number" min="1" value={modal.data.classNumber} onChange={e => setModal({...modal, data: {...modal.data, classNumber: Number(e.target.value)}})} className="text-sm" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <UI.Select label="장애 중증도" value={modal.data.severity} onChange={e => setModal({...modal, data: {...modal.data, severity: Number(e.target.value)}})} options={[1,2,3,4,5].map(n => ({ value: n, label: `${n}순위` }))} className="text-sm py-1" />
+              <div>
+                <label className="block text-[11px] font-bold text-gray-500 mb-1">테마 색상</label>
+                <div className="flex gap-1 overflow-x-auto pb-1 custom-scrollbar">
+                  {PASTEL_COLORS.slice(0, 10).map((color, i) => (
+                    <button key={i} type="button" onClick={() => setModal({...modal, data: {...modal.data, themeColor: color}})} className={`w-6 h-6 rounded-full shrink-0 border-2 transition-transform ${modal.data.themeColor?.id === color.id ? 'scale-110 border-gray-800' : 'border-transparent'}`} style={{ backgroundColor: color.hex }} />
+                  ))}
                 </div>
               </div>
             </div>
-          );
-        })}
-      </div>
-      {modal?.type==='success' && <UI.Modal onClose={()=>setModal(null)} maxWidth="max-w-sm"><div className="p-8 text-center"><Check size={48} className="text-green-500 mx-auto mb-4"/><h3 className="text-xl font-bold mb-6">저장 완료!</h3><UI.Btn className="w-full bg-green-500" onClick={()=>setModal(null)}>확인</UI.Btn></div></UI.Modal>}
-      {modal && modal.type !== 'success' && <StudentModal student={modal.data} onClose={() => setModal(null)} onSave={save} onDelete={(id) => setConfirmModal({ open: true, id })} isEdit={modal.type === 'edit'} />}
-      <ConfirmModal isOpen={confirmModal.open} message="정말 삭제하시겠습니까?" onConfirm={()=>{setStudents(students.filter(s=>s.id!==confirmModal.id)); setConfirmModal({open:false})}} onCancel={()=>setConfirmModal({open:false})} />
+
+            <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+              <label className="block text-xs font-extrabold text-gray-700 mb-2 flex items-center gap-1.5"><BookOpen size={14} className="text-pink-500"/> 특수학급 수업 과목 & 목표 시수 (주당)</label>
+              <div className="grid grid-cols-4 md:grid-cols-6 gap-1.5 mb-2">
+                {TARGET_SUBJECTS.map(subj => {
+                  const isSelected = (modal.data.targetSubjects || []).includes(subj);
+                  return (
+                    <button key={subj} type="button" onClick={() => toggleSubject(subj)} className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition-all border ${isSelected ? 'bg-white border-pink-400 text-pink-600 shadow-sm' : 'bg-transparent border-gray-200 text-gray-400 hover:bg-white'}`}>
+                      {subj}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              {(modal.data.targetSubjects || []).length > 0 && (
+                <div className="mt-2 pt-2 border-t border-dashed border-gray-200 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {(modal.data.targetSubjects || []).map(subj => (
+                    <div key={subj} className="flex items-center justify-between bg-white px-2 py-1 rounded-md border shadow-sm">
+                      <span className="text-[11px] font-bold text-gray-700">{subj}</span>
+                      <div className="flex items-center gap-1">
+                        <input type="number" min="1" max="10" value={modal.data.subjectHours?.[subj] || 1} onChange={e => updateHours(subj, e.target.value)} className="w-8 text-center bg-gray-50 border rounded p-0.5 text-[11px] font-bold outline-none focus:ring-1 focus:ring-pink-300"/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <UI.Btn type="button" variant="secondary" onClick={() => setModal({ open: false, data: null })} className="flex-1 py-2 text-sm">취소</UI.Btn>
+              <UI.Btn type="submit" className="flex-1 bg-gray-800 py-2 text-sm">저장하기</UI.Btn>
+            </div>
+          </form>
+        </UI.Modal>
+      )}
+
+      <ConfirmModal isOpen={!!confirm} message="정말 삭제하시겠습니까? 관련된 시간표 데이터에 영향을 줄 수 있습니다." onConfirm={() => { setStudents(students.filter(s => s.id !== confirm)); setConfirm(null); }} onCancel={() => setConfirm(null)} />
     </div>
-  );
-}
-
-function StudentModal({ student, onClose, onSave, onDelete, isEdit }) {
-  const [form, setForm] = useState(student || { 
-    name: '', grade: '1', classNumber: '', severity: '3', teacher: '', targetSubjects: [],
-    gender: '남', integrationType: '완전통합', themeColor: PASTEL_COLORS[0]
-  });
-  const fRef = useRef();
-  
-  const handlePhoto = (e) => { const f = e.target.files[0]; if(f) { const r = new FileReader(); r.onloadend = () => setForm(p => ({...p, photo: r.result})); r.readAsDataURL(f); }};
-  const toggleSub = (s) => setForm(p => ({...p, targetSubjects: p.targetSubjects.includes(s) ? p.targetSubjects.filter(i => i !== s) : [...p.targetSubjects, s]}));
-  
-  return (
-    <UI.Modal onClose={onClose} maxWidth="max-w-2xl">
-      <div className="p-6 bg-gray-50 flex flex-col items-center relative"><button onClick={onClose} className="absolute top-4 right-4"><X size={20}/></button>{isEdit && <button onClick={() => onDelete(form.id)} className="absolute top-4 left-4 text-red-500"><Trash2 size={20}/></button>}<div className="relative group w-32 h-32 rounded-full border-4 border-white shadow-lg overflow-hidden bg-white mb-4" onClick={()=>fRef.current.click()}><img src={form.photo} className="w-full h-full object-cover"/><div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer"><Camera className="text-white"/></div><input type="file" ref={fRef} onChange={handlePhoto} className="hidden" accept="image/*"/></div><input lang="ko" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="text-3xl font-extrabold bg-transparent text-center outline-none w-40" placeholder="이름" /></div>
-      <div className="p-8 h-[50vh] overflow-y-auto custom-scrollbar space-y-6">
-        
-        {/* 성별 및 통합형태 토글 영역 */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="flex bg-gray-100 rounded-xl p-1">
-            {['남', '여'].map(g => (
-              <button key={g} type="button" onClick={() => setForm({...form, gender: g})} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${form.gender === g ? 'bg-white shadow text-pink-500' : 'text-gray-400'}`}>{g}</button>
-            ))}
-          </div>
-          <div className="flex bg-gray-100 rounded-xl p-1">
-            {['완전통합', '시간제'].map(t => (
-              <button key={t} type="button" onClick={() => setForm({...form, integrationType: t})} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${form.integrationType === t ? 'bg-white shadow text-blue-500' : 'text-gray-400'}`}>{t}</button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-6"><div className="space-y-3"><div className="flex gap-2"><UI.Select label="학년" value={form.grade} onChange={e => setForm({...form, grade: e.target.value})} options={[1,2,3,4,5,6].map(g => ({value: g, label: `${g}학년`}))} /><UI.Input label="반" value={form.classNumber} onChange={e => setForm({...form, classNumber: e.target.value})} /></div><UI.Input label="중증도 순위 (1~3)" type="number" min="1" max="3" value={form.severity} onChange={e => setForm({...form, severity: e.target.value})} placeholder="숫자만 입력" /><UI.Input label="담임 선생님" value={form.teacher} onChange={e => setForm({...form, teacher: e.target.value})} /></div>
-        <div className="space-y-3"><UI.Input label="생년월일" type="date" value={form.birthDate} onChange={e => setForm({...form, birthDate: e.target.value})} /><UI.Select label="장애 영역" value={form.disabilityType} onChange={e => setForm({...form, disabilityType: e.target.value})} options={['지적장애', '자폐성장애', '시각장애', '청각장애', '지체장애', '발달지체', '정서행동장애', '기타'].map(v => ({value: v, label: v}))} /></div></div>
-        
-        {/* 20색 파스텔 컬러 팔레트 영역 */}
-        <div className="bg-gray-50 p-4 rounded-2xl">
-          <h3 className="font-bold text-gray-500 mb-3 text-sm">🎨 학생 테마 색상 지정</h3>
-          <div className="flex flex-wrap gap-2">
-            {PASTEL_COLORS.map(c => (
-              <button key={c.id} type="button" onClick={() => setForm({...form, themeColor: c})} 
-                className={`w-8 h-8 rounded-full border-2 transition-all ${form.themeColor?.id === c.id ? 'border-gray-800 scale-125 shadow-md' : 'border-transparent hover:scale-110'}`}
-                style={{ backgroundColor: c.hex }} 
-              />
-            ))}
-          </div>
-        </div>
-
-        <div><h3 className="font-bold text-gray-400 border-b pb-2 mb-2 flex items-center gap-2"><BookOpen size={16}/> 대상 과목</h3><div className="flex flex-wrap gap-2">{TARGET_SUBJECTS.map(s => <button key={s} onClick={() => toggleSub(s)} className={`px-3 py-1 rounded-full text-sm font-bold transition-all ${form.targetSubjects.includes(s) ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{s}</button>)}</div></div>
-        <div className="grid grid-cols-2 gap-4"><textarea lang="ko" value={form.dreamCardUsage} onChange={e => setForm({...form, dreamCardUsage: e.target.value})} className="p-3 bg-yellow-50 border-yellow-100 border rounded-xl h-20 text-sm resize-none" placeholder="꿈꾸미 카드 메모" /><textarea lang="ko" value={form.jaramiCardUsage} onChange={e => setForm({...form, jaramiCardUsage: e.target.value})} className="p-3 bg-green-50 border-green-100 border rounded-xl h-20 text-sm resize-none" placeholder="자라미 카드 메모" /></div>
-      </div>
-      <div className="p-4 border-t flex justify-end"><UI.Btn onClick={() => onSave(form)} className="px-8 bg-gray-800">저장하기</UI.Btn></div>
-    </UI.Modal>
   );
 }
