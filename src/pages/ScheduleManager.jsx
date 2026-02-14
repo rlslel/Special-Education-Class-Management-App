@@ -1,17 +1,41 @@
 import React, { useState, useMemo } from 'react';
-import { Clock, Wand2, RotateCcw, GraduationCap, X, Printer, Activity } from 'lucide-react';
-import { usePersistentState, DAYS, PERIODS, getStudentColor, PASTEL_COLORS } from '../utils/helpers';
+import { Clock, Wand2, RotateCcw, GraduationCap, X, Printer, Activity, Calendar as CalIcon, Sparkles } from 'lucide-react';
+import { usePersistentState, DAYS, PERIODS, getStudentColor, PASTEL_COLORS, getHolidayName } from '../utils/helpers';
 import { UI, ConfirmModal } from '../components/SharedUI';
+
+const getKoreanHoliday = (date) => {
+  if (!date) return null;
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  const mmdd = `${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const solarHolidays = { '01-01': '신정', '03-01': '삼일절', '05-05': '어린이날', '06-06': '현충일', '08-15': '광복절', '10-03': '개천절', '10-09': '한글날', '12-25': '성탄절' };
+  if (solarHolidays[mmdd]) return solarHolidays[mmdd];
+  
+  const official = getHolidayName(date);
+  if (official) {
+    if (official.includes('신정') || official.includes('새해')) return null; 
+    if (official.includes('기독탄신일') || official.includes('크리스마스')) return null;
+  }
+  return official;
+};
 
 export default function ScheduleManager({ students, staff }) {
   const [semester, setSemester] = useState(1);
   const [schedule, setSchedule] = usePersistentState('integrated_schedule', {});
   const [gradeTimes, setGradeTimes] = usePersistentState('grade_timetables_detail', (() => { const i = {}; [1,2,3,4,5,6].forEach(g => i[g] = Array(5).fill(null).map(() => Array(6).fill(true))); return i; })());
+  
+  const [semesterDates, setSemesterDates] = usePersistentState('semester_dates_v1', {
+    1: { start: '2026-03-02', end: '2026-07-17' },
+    2: { start: '2026-08-17', end: '2026-12-31' }
+  });
+  
+  const [teacherSchedules] = usePersistentState('teacher_schedules', {});
+
   const [logicMode, setLogicMode] = useState('severity'); 
   const [modal, setModal] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ open: false, type: null }); 
   const [gradeModal, setGradeModal] = useState(false); 
-  const [activeGradeTab, setActiveGradeTab] = useState(1);
+  const [datesModal, setDatesModal] = useState(false); 
   
   const [printModal, setPrintModal] = useState(false);
   const [printTargetId, setPrintTargetId] = useState('all');
@@ -28,7 +52,6 @@ export default function ScheduleManager({ students, staff }) {
     return { teacherClasses, supportCounts, studentSupportCounts };
   }, [schedule, semester, staff, students]);
 
-  // 🔥 [2단계 핵심 기능] 실시간 시수 계산 로직
   const currentHours = useMemo(() => {
     const counts = {}; 
     students.forEach(s => counts[s.id] = {});
@@ -41,6 +64,81 @@ export default function ScheduleManager({ students, staff }) {
     });
     return counts;
   }, [schedule, semester, students]);
+
+  const validDaysCount = useMemo(() => {
+    const dates = semesterDates[semester];
+    const counts = { Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0 };
+    if (!dates || !dates.start || !dates.end) return counts;
+    
+    const start = new Date(dates.start);
+    const end = new Date(dates.end);
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dayOfWeek = d.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) continue; 
+      
+      const dStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (getKoreanHoliday(d)) continue;
+      
+      const daySchedules = teacherSchedules[dStr] || [];
+      if (daySchedules.some(s => s.isHoliday)) continue;
+      
+      counts[dayNames[dayOfWeek]]++; 
+    }
+    return counts;
+  }, [semester, semesterDates, teacherSchedules]);
+
+  const expectedSemesterHours = useMemo(() => {
+    const totals = {}; 
+    students.forEach(s => totals[s.id] = {});
+    
+    Object.keys(schedule[semester] || {}).forEach(key => {
+      const [day, period] = key.split('-'); 
+      const slots = schedule[semester][key] || [];
+      slots.forEach(slot => {
+        if (slot.type === 'special' && slot.subject && totals[slot.studentId]) {
+          const currentTotal = totals[slot.studentId][slot.subject] || 0;
+          totals[slot.studentId][slot.subject] = currentTotal + (validDaysCount[day] || 0);
+        }
+      });
+    });
+    return totals;
+  }, [schedule, semester, students, validDaysCount]);
+
+  // 🔥 [신규] 달력 일정에서 개학식/방학식을 스캔하여 자동 입력하는 함수
+  const autoDetectSemesters = () => {
+    let sem1Start = '', sem1End = '', sem2Start = '', sem2End = '';
+    const allDates = Object.keys(teacherSchedules).sort();
+    
+    allDates.forEach(date => {
+      const events = teacherSchedules[date];
+      events.forEach(ev => {
+        const t = ev.title;
+        const month = parseInt(date.split('-')[1], 10);
+        
+        if ((t.includes('시업') || t.includes('개학') || t.includes('입학')) && month <= 3) {
+          if(!sem1Start) sem1Start = date;
+        }
+        if (t.includes('여름방학') && month >= 7 && month <= 8) {
+          if(!sem1End) sem1End = date;
+        }
+        if (t.includes('개학') && month >= 8 && month <= 9) {
+          if(!sem2Start) sem2Start = date;
+        }
+        if ((t.includes('종업') || t.includes('겨울방학') || t.includes('졸업')) && (month >= 12 || month <= 2)) {
+           sem2End = date;
+        }
+      });
+    });
+    
+    setSemesterDates({
+      1: { start: sem1Start || semesterDates[1].start, end: sem1End || semesterDates[1].end },
+      2: { start: sem2Start || semesterDates[2].start, end: sem2End || semesterDates[2].end }
+    });
+    
+    alert('달력에 등록된 학사일정(개학, 방학 등)을 스캔하여 기간을 불러왔습니다!\n자동 입력된 날짜가 정확한지 확인해주세요. ✨');
+  };
 
   const autoAssign = () => {
     if(!staff.length) return alert('등록된 인력이 없습니다.');
@@ -95,28 +193,25 @@ export default function ScheduleManager({ students, staff }) {
             aside { display: none !important; } 
             main { overflow: visible !important; } 
             .normal-view { display: none !important; } 
-            .print-view { 
-              display: flex !important; 
-              position: fixed !important; 
-              top: 0 !important; 
-              left: 0 !important; 
-              width: 100vw !important; 
-              height: 100vh !important; 
-              background: white !important; 
-              z-index: 999999 !important;
-              flex-direction: column;
-              padding: 20px;
-              box-sizing: border-box;
-            }
+            .print-view { display: flex !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background: white !important; z-index: 999999 !important; flex-direction: column; padding: 20px; box-sizing: border-box; }
           }
         `}
       </style>
 
-      {/* 평소 화면 */}
       <div className="normal-view p-8 h-full flex flex-col">
-        <header className="flex flex-col gap-6 mb-4 shrink-0">
+        <header className="flex flex-col gap-4 mb-4 shrink-0">
           <div className="flex justify-between items-center">
-            <div><h2 className="text-3xl font-extrabold text-gray-800">통합 시간표</h2></div>
+            <div className="flex items-center gap-4">
+              <h2 className="text-3xl font-extrabold text-gray-800">통합 시간표</h2>
+              <select value={semester} onChange={e => setSemester(Number(e.target.value))} className="p-2 border rounded-xl font-bold bg-white text-gray-700 outline-none">
+                <option value={1}>1학기</option>
+                <option value={2}>2학기</option>
+              </select>
+              <button onClick={() => setDatesModal(true)} className="flex items-center gap-1.5 px-3 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100 transition-colors text-sm">
+                <CalIcon size={16}/> 기간 설정
+              </button>
+            </div>
+            
             <div className="flex gap-2">
               <button onClick={() => setGradeModal(true)} className="px-4 py-2 bg-white border rounded-xl font-bold hover:bg-gray-50 flex items-center gap-2"><Clock size={18}/> 학년별 시수 설정</button>
               <button onClick={() => setPrintModal(true)} className="flex items-center gap-2 px-4 py-2 bg-pink-50 text-pink-600 rounded-xl font-bold border border-pink-200 hover:bg-pink-100 transition-colors"><Printer size={18}/> 맞춤형 인쇄/저장</button>
@@ -126,10 +221,8 @@ export default function ScheduleManager({ students, staff }) {
           <div className="bg-gray-800 text-white rounded-2xl p-4 flex flex-wrap items-center shadow-lg gap-4"><div className="flex items-center gap-3 px-2 pr-6 border-r border-gray-600"><div className="bg-pink-500 p-2 rounded-lg"><GraduationCap size={20}/></div><div><p className="text-xs text-gray-400 font-bold">주간 수업</p><p className="text-xl font-bold">{stats.teacherClasses}시간</p></div></div><div className="flex gap-4 overflow-x-auto custom-scrollbar items-center px-2">{staff.map(s => (<div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap"><div className={`w-2 h-2 rounded-full ${s.type==='practical'?'bg-blue-400':'bg-green-400'}`}/><div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.supportCounts[s.id] || 0}회</p></div></div>))}</div><div className="w-px h-8 bg-gray-600 mx-2"></div><div className="flex gap-4 overflow-x-auto custom-scrollbar items-center flex-1">{students.map(s => (<div key={s.id} className="flex items-center gap-2 bg-gray-700/50 px-3 py-2 rounded-xl whitespace-nowrap"><div className="w-2 h-2 rounded-full bg-yellow-400"/><div><p className="text-[10px] text-gray-400">{s.name}</p><p className="font-bold">{stats.studentSupportCounts[s.id] || 0}회</p></div></div>))}</div></div>
         </header>
 
-        {/* 🔥 4:1 화면 분할 레이아웃 시작! (flex = 4 와 flex = 1) */}
         <div className="flex-1 flex gap-6 min-h-0">
           
-          {/* 좌측: 기존 시간표 영역 (80%) */}
           <div className="bg-white p-4 rounded-[2rem] shadow-xl flex flex-col overflow-hidden" style={{ flex: 4 }}>
             <div className="grid grid-cols-6 gap-2 mb-2 text-center h-12 shrink-0">
               <div className="font-bold text-gray-400 bg-gray-50 rounded-xl flex items-center justify-center">교시</div>
@@ -161,7 +254,6 @@ export default function ScheduleManager({ students, staff }) {
             </div>
           </div>
 
-          {/* 우측: 시수 검증기 영역 (20%) */}
           <div className="bg-gray-50 p-5 rounded-[2rem] border border-gray-200 shadow-inner flex flex-col overflow-y-auto custom-scrollbar" style={{ flex: 1 }}>
             <h3 className="text-sm font-extrabold text-gray-800 mb-4 flex items-center gap-2 shrink-0">
               <span className="p-1.5 bg-pink-100 text-pink-600 rounded-lg"><Activity size={16}/></span>
@@ -172,14 +264,14 @@ export default function ScheduleManager({ students, staff }) {
               {students.length === 0 ? (
                 <p className="text-xs text-center text-gray-400 mt-10">학생을 등록해주세요.</p>
               ) : students.map(s => {
-                if (!s.targetSubjects?.length) return null; // 설정된 과목이 없으면 표시 안 함
+                if (!s.targetSubjects?.length) return null;
                 return (
                   <div key={s.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                     <div className="font-bold text-gray-700 mb-3 flex items-center gap-2 text-sm">
                       <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.themeColor?.hex || '#ccc' }}></div>
                       {s.name}
                     </div>
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       {s.targetSubjects.map(subj => {
                         const target = s.subjectHours?.[subj] || 1; 
                         const current = currentHours[s.id]?.[subj] || 0;
@@ -187,22 +279,26 @@ export default function ScheduleManager({ students, staff }) {
                         const isOver = current > target;
                         const percent = Math.min((current / target) * 100, 100);
                         
-                        // 충족 여부에 따라 색상 변경 (부족: 노랑, 달성: 초록, 초과: 빨강)
+                        const expectedTotal = expectedSemesterHours[s.id]?.[subj] || 0;
+                        
                         const barColor = isOver ? 'bg-red-400' : (isMet ? 'bg-green-400' : 'bg-yellow-400');
                         const textColor = isOver ? 'text-red-500' : (isMet ? 'text-green-500' : 'text-yellow-600');
 
                         return (
                           <div key={subj} className="text-xs">
-                            <div className="flex justify-between items-end mb-1.5">
+                            <div className="flex justify-between items-end mb-1">
                               <span className="font-bold text-gray-600">{subj}</span>
-                              <span className={`font-extrabold tracking-wider ${textColor}`}>
-                                {current} <span className="text-gray-300 font-normal">/ {target}</span>
-                              </span>
+                              <div className="flex items-end gap-2">
+                                <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold">학기: {expectedTotal}시간 예상</span>
+                                <span className={`font-extrabold tracking-wider ${textColor}`}>
+                                  {current} <span className="text-gray-300 font-normal">/ {target}</span>
+                                </span>
+                              </div>
                             </div>
                             <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
                               <div className={`h-full ${barColor} transition-all duration-500 ease-out`} style={{ width: `${percent}%` }}></div>
                             </div>
-                            {isOver && <p className="text-[9px] text-red-400 mt-1 text-right">⚠️ 시수 초과</p>}
+                            {isOver && <p className="text-[9px] text-red-400 mt-1 text-right">⚠️ 주간 시수 초과</p>}
                           </div>
                         );
                       })}
@@ -212,7 +308,6 @@ export default function ScheduleManager({ students, staff }) {
               })}
             </div>
           </div>
-          {/* 🔥 4:1 화면 분할 끝 */}
 
         </div>
       </div>
@@ -227,6 +322,50 @@ export default function ScheduleManager({ students, staff }) {
       
       {gradeModal && <UI.Modal onClose={()=>setGradeModal(false)} title="학년별 수업/하교 설정" maxWidth="max-w-2xl"><div className="p-6"><div className="flex gap-2 mb-6 border-b">{[1,2,3,4,5,6].map(g => (<button key={g} onClick={() => setActiveGradeTab(g)} className={`px-6 py-3 font-bold rounded-t-xl transition-all ${activeGradeTab === g ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>{g}학년</button>))}</div><div className="bg-gray-50 rounded-2xl p-4"><div className="grid grid-cols-6 gap-2 mb-2 text-center text-sm font-bold text-gray-500"><div>교시</div>{DAYS.map(d => <div key={d}>{d}요일</div>)}</div>{[0,1,2,3,4,5].map((pIdx) => (<div key={pIdx} className="grid grid-cols-6 gap-2 mb-2 items-center"><div className="font-bold text-center text-gray-400">{pIdx + 1}교시</div>{[0,1,2,3,4].map((dIdx) => { const a = gradeTimes[activeGradeTab]?.[dIdx]?.[pIdx]; return <div key={dIdx} onClick={() => toggleGradeTime(dIdx, pIdx)} className={`h-10 rounded-lg cursor-pointer flex items-center justify-center border transition-all text-xs font-bold ${a ? 'bg-green-500 border-green-600 text-white shadow-sm' : 'bg-white border-gray-200 text-gray-300'}`}>{a ? '수업' : '하교'}</div>; })}</div>))}</div><div className="mt-6 flex justify-end"><UI.Btn className="bg-gray-800 px-8" onClick={()=>setGradeModal(false)}>설정 완료</UI.Btn></div></div></UI.Modal>}
       
+      {/* 🔥 모달에 '자동 불러오기' 버튼 추가 */}
+      {datesModal && (
+        <UI.Modal onClose={() => setDatesModal(false)} title="📅 학기 기간 설정" maxWidth="max-w-md">
+          <div className="p-6 space-y-6">
+            <div className="flex justify-between items-center bg-blue-50 p-4 rounded-xl text-blue-600 text-xs leading-relaxed">
+              <div>
+                <span className="font-bold block mb-1">💡 학기 예상 시수란?</span>
+                기간 내 '주말, 공휴일, 달력에 등록된 휴업일'을 뺀 <b>순수 학교 출석일수</b>를 계산해 학기 총 시수를 예측합니다.
+              </div>
+            </div>
+            
+            <div className="flex justify-end -mb-2">
+              <button onClick={autoDetectSemesters} className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-100 text-purple-700 font-bold rounded-lg text-xs hover:bg-purple-200 transition-colors shadow-sm border border-purple-200">
+                <Sparkles size={14}/> 달력 일정에서 자동 불러오기
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 border rounded-xl bg-gray-50">
+                <h4 className="font-bold text-gray-700 mb-3">1학기 기간</h4>
+                <div className="flex items-center gap-2">
+                  <input type="date" value={semesterDates[1]?.start || ''} onChange={e => setSemesterDates({...semesterDates, 1: {...semesterDates[1], start: e.target.value}})} className="flex-1 p-2 border rounded text-sm"/>
+                  <span className="text-gray-400">~</span>
+                  <input type="date" value={semesterDates[1]?.end || ''} onChange={e => setSemesterDates({...semesterDates, 1: {...semesterDates[1], end: e.target.value}})} className="flex-1 p-2 border rounded text-sm"/>
+                </div>
+              </div>
+
+              <div className="p-4 border rounded-xl bg-gray-50">
+                <h4 className="font-bold text-gray-700 mb-3">2학기 기간</h4>
+                <div className="flex items-center gap-2">
+                  <input type="date" value={semesterDates[2]?.start || ''} onChange={e => setSemesterDates({...semesterDates, 2: {...semesterDates[2], start: e.target.value}})} className="flex-1 p-2 border rounded text-sm"/>
+                  <span className="text-gray-400">~</span>
+                  <input type="date" value={semesterDates[2]?.end || ''} onChange={e => setSemesterDates({...semesterDates, 2: {...semesterDates[2], end: e.target.value}})} className="flex-1 p-2 border rounded text-sm"/>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <UI.Btn className="w-full bg-gray-800" onClick={() => setDatesModal(false)}>확인 및 자동 계산</UI.Btn>
+            </div>
+          </div>
+        </UI.Modal>
+      )}
+
       <ConfirmModal isOpen={confirmModal.open} message={confirmModal.type === 'reset' ? "시간표를 초기화하시겠습니까?" : `[${logicMode==='severity'?'중증도 우선':'균등 배정'}] 로직으로 자동 배치하시겠습니까?`} onConfirm={confirmModal.type === 'reset' ? () => {setSchedule({...schedule, [semester]:{}}); setConfirmModal({open:false});} : autoAssign} onCancel={() => setConfirmModal({ open: false, type: null })} />
 
       {printModal && (
@@ -250,7 +389,6 @@ export default function ScheduleManager({ students, staff }) {
         </UI.Modal>
       )}
 
-      {/* 🔥 인쇄할 때만 도화지처럼 전체 화면을 덮어버리는 뷰 (손대지 않음!) */}
       <div className="hidden print-view text-[#8D6E63]">
         <div className="w-full flex flex-col items-center shrink-0 mb-4">
           <h1 className="text-3xl font-extrabold bg-[#EFEBE4] px-16 py-3 rounded-xl tracking-widest shadow-sm mb-4">

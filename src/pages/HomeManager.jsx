@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Clock, CheckSquare, Edit2, Plus, Trash2, Check, X, Calendar as CalIcon, Camera, Sparkles, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, CheckSquare, Edit2, Plus, Trash2, Check, X, Calendar as CalIcon, Camera, Sparkles, RefreshCw, AlertTriangle } from 'lucide-react';
 import { usePersistentState, isSameDay, getCalendarDays, getHolidayName, PASTEL_COLORS } from '../utils/helpers';
 import { UI } from '../components/SharedUI';
 
@@ -19,8 +19,11 @@ export default function HomeManager() {
   const [isHolidayAdd, setIsHolidayAdd] = useState(false);
   const [showDDayModal, setShowDDayModal] = useState(false); 
   
+  // 🔥 AI 분석용 모달 상태 추가
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiFile, setAiFile] = useState(null);
+  const [aiCustomPrompt, setAiCustomPrompt] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const fileInputRef = useRef(null);
   
   const getLocalDateString = (date) => {
     if (!date) return '';
@@ -33,6 +36,22 @@ export default function HomeManager() {
   const [dDayForm, setDDayForm] = useState({ title: '', date: getLocalDateString(new Date()) });
   const PALETTE = { blue: '#405DE6', royal: '#5B51D8', purple: '#833AB4', magenta: '#C13584', pink: '#E1306C', red: '#FD1D1D', orangeRed: '#F56040', orange: '#F77737', yellowOrange: '#FCAF45', yellow: '#FFDC80' };
 
+  const getKoreanHoliday = (date) => {
+    if (!date) return null;
+    const m = date.getMonth() + 1;
+    const d = date.getDate();
+    const mmdd = `${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const solarHolidays = { '01-01': '신정', '03-01': '삼일절', '05-05': '어린이날', '06-06': '현충일', '08-15': '광복절', '10-03': '개천절', '10-09': '한글날', '12-25': '성탄절' };
+    if (solarHolidays[mmdd]) return solarHolidays[mmdd];
+    
+    const official = getHolidayName(date);
+    if (official) {
+      if (official.includes('신정') || official.includes('새해')) return null; 
+      if (official.includes('기독탄신일') || official.includes('크리스마스')) return null;
+    }
+    return official;
+  };
+
   const toBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -40,39 +59,38 @@ export default function HomeManager() {
     reader.onerror = error => reject(error);
   });
 
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!apiKey) {
-      alert("환경설정 탭에서 Gemini API 키를 먼저 등록해주세요!");
-      return;
-    }
+  // 🔥 AI 분석 실행 (선생님 맞춤 프롬프트 결합)
+  const handleAiAnalysis = async () => {
+    if (!aiFile) return alert("파일을 먼저 선택해주세요.");
+    if (!apiKey) return alert("환경설정 탭에서 Gemini API 키를 먼저 등록해주세요!");
 
     setIsAnalyzing(true);
     try {
-      const base64Data = await toBase64(file);
+      const base64Data = await toBase64(aiFile);
       const base64Content = base64Data.split(',')[1];
       const currentYear = new Date().getFullYear();
 
-      // 🔥 AI에게 전국 공통 법정 공휴일은 제외하라고 명령!
+      const customInstruction = aiCustomPrompt.trim() ? `\n\n[선생님의 특별 추가 요청사항 (반드시 최우선으로 반영할 것!)]\n${aiCustomPrompt}` : '';
+
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{
             parts: [
-              { text: `당신은 한국 특수교사를 돕는 '학사일정 전사(Transcription) 및 데이터 추출 전문가'입니다. 첨부된 이미지 또는 PDF에서 학사일정을 완벽하게 추출하세요. 현재 기준 연도는 ${currentYear}년입니다.
+              { text: `당신은 한국 특수교사를 돕는 '학사일정 데이터 추출 전문가'입니다. 첨부된 이미지/PDF에서 학사일정을 추출하세요. 현재 기준 연도는 ${currentYear}년입니다.
               
-              [초강력 주의사항 - 위반 시 절대 안 됨]
-              1. 원본 100% 그대로 전사: 문서에 적힌 텍스트를 그대로 'title'에 적으세요. 임의 해석 절대 금지.
-              2. 방학 기간의 정확한 계산 및 분할 (가장 중요): '방학식' 다음 날부터 ~ '개학식' 전날까지 속하는 **모든 개별 날짜(토, 일요일 포함 전부)**를 하루씩 쪼개서 각각의 JSON 객체로 만드세요. ("isHoliday": true)
-              3. 전국 공통 법정 공휴일 제외 (필수): 1월 1일(신정), 삼일절, 어린이날, 현충일, 광복절, 추석, 설날, 성탄절 등 **달력에 이미 있는 공휴일은 절대로 추출하지 마세요.** (단, 해당 학교만의 '학교장재량휴업일', '개교기념일'은 추출해야 함)
-              4. 날짜 형식: 반드시 "YYYY-MM-DD" 형태로 통일하세요.
+              [초강력 주의사항]
+              1. 원본 100% 그대로 전사: 문서 텍스트를 임의 해석하지 마세요.
+              2. 방학 기간 분할 (가장 중요): '방학식' 다음 날부터 '개학식' 전날까지 속하는 모든 개별 날짜를 하루씩 쪼개서 각각의 JSON 객체로 만드세요. ("isHoliday": true)
+              3. 전국 공통 법정 공휴일 제외: 1월 1일, 삼일절, 어린이날, 추석 등 달력에 이미 있는 공휴일은 추출하지 마세요.
+              4. 날짜 형식: "YYYY-MM-DD"
+              ${customInstruction}
               
               반드시 JSON 배열 구조로만 응답하세요.
-              [ { "date": "2026-03-07", "title": "학교교육과정 설명회", "isHoliday": false } ]` 
+              [ { "date": "2026-03-07", "title": "학부모 상담주간", "isHoliday": false } ]` 
               },
-              { inline_data: { mime_type: file.type, data: base64Content } }
+              { inline_data: { mime_type: aiFile.type, data: base64Content } }
             ]
           }],
           generationConfig: {
@@ -83,10 +101,7 @@ export default function HomeManager() {
       });
 
       const result = await response.json();
-      
-      if (!result.candidates || !result.candidates[0]) {
-        throw new Error("API 응답에 오류가 있습니다.");
-      }
+      if (!result.candidates || !result.candidates[0]) throw new Error("API 응답에 오류가 있습니다.");
 
       const rawText = result.candidates[0].content.parts[0].text;
       const parsedData = JSON.parse(rawText); 
@@ -94,16 +109,12 @@ export default function HomeManager() {
       setSchedules(prev => {
         const next = { ...prev };
         parsedData.forEach(item => {
-          // 🔥 1차 방어막: 시스템에 이미 등록된 공휴일(신정 등)이면 아예 추가 안 함
           const [y, m, d] = item.date.split('-');
           const itemDate = new Date(y, m - 1, d);
-          if (getHolidayName(itemDate)) return; 
-
+          if (getKoreanHoliday(itemDate)) return; 
           if (!next[item.date]) next[item.date] = [];
           
-          // 🔥 2차 방어막: 이미 똑같은 이름의 일정이 있으면 중복 추가 방지
           const isDuplicate = next[item.date].some(sch => sch.title === item.title);
-          
           if (!isDuplicate) {
             next[item.date].push({ id: Date.now() + Math.random(), title: item.title, isHoliday: item.isHoliday, isAiGenerated: true });
           }
@@ -111,30 +122,35 @@ export default function HomeManager() {
         return next;
       });
 
-      alert(`🎉 분석 완료! 달력에 꼼꼼하게 등록되었습니다. (중복 및 기본 공휴일은 자동 제외)`);
+      alert(`🎉 분석 완료! 달력에 꼼꼼하게 등록되었습니다.`);
+      setAiModalOpen(false); // 분석 성공 시 모달 닫기
+      setAiFile(null);
+      setAiCustomPrompt('');
     } catch (err) {
       console.error(err);
-      alert("분석 중 오류가 발생했습니다. 사진 화질이 명확한지 확인해주세요.");
+      alert("분석 중 오류가 발생했습니다. 파일 형식을 확인해주세요.");
     } finally {
       setIsAnalyzing(false);
-      e.target.value = ''; 
     }
   };
 
   const handleClearAiSchedules = () => {
-    if(!window.confirm('AI가 분석해서 등록한 일정을 모두 삭제하시겠습니까?\n(선생님이 직접 추가한 일정은 안전하게 유지됩니다!)')) return;
-    
+    if(!window.confirm('AI가 분석해서 등록한 일정을 모두 삭제하시겠습니까?')) return;
     setSchedules(prev => {
       const next = {};
       Object.keys(prev).forEach(date => {
         const manuallyAdded = prev[date].filter(sch => !sch.isAiGenerated);
-        if (manuallyAdded.length > 0) {
-          next[date] = manuallyAdded;
-        }
+        if (manuallyAdded.length > 0) next[date] = manuallyAdded;
       });
       return next;
     });
-    alert('AI 일정만 깔끔하게 지워졌습니다. 🧹 다시 사진을 올려보세요!');
+    alert('AI 일정만 깔끔하게 지워졌습니다. 🧹');
+  };
+
+  const handleResetCalendar = () => {
+    if(!window.confirm('⚠️ 정말 달력에 등록된 모든 일정을 삭제하고 기본 상태로 초기화하시겠습니까?\n(기본 법정 공휴일은 유지됩니다.)')) return;
+    setSchedules({});
+    alert('달력이 기본 상태로 초기화되었습니다. ✨');
   };
 
   const handleAdd = (e) => {
@@ -174,10 +190,8 @@ export default function HomeManager() {
     const [y, m, d] = targetDateStr.split('-');
     const target = new Date(y, m - 1, d);
     target.setHours(0, 0, 0, 0);
-    
     const diffTime = target.getTime() - today.getTime();
     const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-    
     if (diffDays === 0) return 'D-Day';
     return diffDays > 0 ? `D-${diffDays}` : `D+${Math.abs(diffDays)}`;
   };
@@ -192,8 +206,7 @@ export default function HomeManager() {
     setDDayForm({ title: '', date: getLocalDateString(new Date()) });
   };
 
-  // 현재 선택된 날짜의 공휴일 여부 확인
-  const currentOfficialHoliday = getHolidayName(selectedDate);
+  const currentOfficialHoliday = getKoreanHoliday(selectedDate);
 
   return (
     <div className="p-6 h-full flex flex-col items-center justify-center bg-gray-50">
@@ -218,12 +231,11 @@ export default function HomeManager() {
               const dStr = getLocalDateString(date);
               const isSel = isSameDay(date, selectedDate);
               const isToday = isSameDay(date, new Date());
-              const officialHoliday = getHolidayName(date);
               
+              const officialHoliday = getKoreanHoliday(date);
               const manualHolidays = (schedules[dStr] || []).filter(s => s.isHoliday);
               const hasManualHoliday = manualHolidays.length > 0;
               const isRedDay = date.getDay() === 0 || date.getDay() === 6 || officialHoliday || hasManualHoliday;
-
               const dayDDays = dDays.filter(d => d.date === dStr);
 
               return (
@@ -289,24 +301,19 @@ export default function HomeManager() {
               
               <div className="flex flex-col items-end gap-3">
                 <div className="flex gap-2">
-                  <input type="file" accept="image/*, application/pdf" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
-                  <button 
-                    onClick={() => fileInputRef.current.click()} 
-                    disabled={isAnalyzing}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all shadow-sm ${isAnalyzing ? 'bg-gray-100 text-gray-400' : 'bg-gradient-to-r from-purple-100 to-pink-100 text-purple-600 hover:shadow hover:scale-105 border border-purple-200'}`}
-                  >
-                    {isAnalyzing ? (
-                      <><Sparkles size={14} className="animate-spin" /> 데이터 분석 중...</>
-                    ) : (
-                      <><Camera size={14} /> ✨ AI 학사일정 분석기</>
-                    )}
+                  {/* 🔥 AI 분석 버튼 클릭 시 모달창 열림 */}
+                  <button onClick={() => setAiModalOpen(true)} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-extrabold transition-all shadow-sm bg-gradient-to-r from-purple-100 to-pink-100 text-purple-600 hover:shadow hover:scale-105 border border-purple-200">
+                    <Camera size={14} /> ✨ AI 학사일정 분석기
                   </button>
-                  <button onClick={handleClearAiSchedules} className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-500 transition-colors border border-gray-200" title="AI로 등록된 일정만 일괄 삭제합니다.">
-                    <RefreshCw size={14}/> AI 일정 삭제
+                  <button onClick={handleClearAiSchedules} className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-gray-50 text-gray-500 hover:bg-gray-100 transition-colors border border-gray-200" title="AI로 등록된 일정만 일괄 삭제합니다.">
+                    <RefreshCw size={14}/> AI 리셋
+                  </button>
+                  <button onClick={handleResetCalendar} className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-red-50 text-red-500 hover:bg-red-100 transition-colors border border-red-200 shadow-sm" title="달력에 등록된 모든 일정을 지우고 기본 상태로 되돌립니다.">
+                    <AlertTriangle size={14}/> 전체 초기화
                   </button>
                 </div>
 
-                <div className="flex bg-gray-100 p-1 rounded-xl">
+                <div className="flex bg-gray-100 p-1 rounded-xl mt-1">
                   {[ { id: 'schedule', icon: Clock, color: PALETTE.blue, label: '일정' }, { id: 'todo', icon: CheckSquare, color: PALETTE.red, label: '할일' }, { id: 'memo', icon: Edit2, color: PALETTE.yellowOrange, label: '메모' } ].map(mode => (
                     <button key={mode.id} onClick={() => setInputType(mode.id)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${inputType === mode.id ? 'bg-white shadow-sm' : 'text-gray-400 hover:text-gray-600'}`} style={{ color: inputType === mode.id ? mode.color : '' }}><mode.icon size={14}/> {mode.label}</button>
                   ))}
@@ -333,7 +340,6 @@ export default function HomeManager() {
               <h4 className="text-xs font-bold text-gray-400 mb-3 flex items-center gap-2 uppercase tracking-wider"><div className="w-1.5 h-1.5 rounded-full" style={{background: PALETTE.blue}}></div> Schedule</h4>
               <div className="space-y-3">
                 
-                {/* 🔥 기본 공휴일(읽기 전용 표시 - 삭제 버튼 없음!) */}
                 {currentOfficialHoliday && (
                   <div className="flex items-center gap-4 animate-fade-in-up">
                     <div className="w-1 h-full min-h-[3rem] rounded-full bg-red-400"></div>
@@ -346,7 +352,6 @@ export default function HomeManager() {
                   </div>
                 )}
 
-                {/* 교사가 입력하거나 AI가 추가한 일정 */}
                 {(schedules[getLocalDateString(selectedDate)] || []).map((sch, i) => (
                   <div key={sch.id} className="flex items-center gap-4 group animate-fade-in-up" style={{animationDelay: `${i*0.05}s`}}>
                     <div className="w-1 h-full min-h-[3rem] rounded-full" style={{ background: `linear-gradient(to bottom, ${PALETTE.blue}, ${PALETTE.royal})` }}></div>
@@ -357,7 +362,6 @@ export default function HomeManager() {
                   </div>
                 ))}
                 
-                {/* 공휴일도 없고, 교사가 추가한 일정도 없을 때만 표시 */}
                 {!currentOfficialHoliday && (schedules[getLocalDateString(selectedDate)] || []).length === 0 && (
                   <div className="text-gray-300 text-xs italic pl-4">등록된 일정이 없습니다.</div>
                 )}
@@ -379,22 +383,45 @@ export default function HomeManager() {
                 {(todos[getLocalDateString(selectedDate)] || []).length === 0 && <div className="text-gray-300 text-xs italic pl-4">등록된 할 일이 없습니다.</div>}
               </div>
             </div>
-
-            <div className="pt-6 border-t border-dashed border-gray-200">
-              <h4 className="text-xs font-bold text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-wider"><div className="w-1.5 h-1.5 rounded-full" style={{background: PALETTE.yellowOrange}}></div> Sticky Notes (Always Visible)</h4>
-              <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar min-h-[160px]">
-                {memos.length > 0 ? memos.map(memo => (
-                  <div key={memo.id} className="shrink-0 w-48 h-48 p-5 shadow-lg flex flex-col justify-between transition-transform hover:scale-105 hover:z-10 group" style={{ backgroundColor: PALETTE.yellow, transform: `rotate(${memo.rotation}deg)`, boxShadow: '4px 4px 15px rgba(0,0,0,0.1)' }}>
-                    <p className="font-gaegu text-gray-800 text-sm leading-relaxed whitespace-pre-wrap flex-1 overflow-hidden" style={{ fontFamily: 'sans-serif' }}>{memo.text}</p>
-                    <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => deleteItem('memo', memo.id)} className="p-1.5 bg-black/10 rounded-full hover:bg-black/20 text-gray-700"><X size={12}/></button></div>
-                  </div>
-                )) : <div className="w-full flex items-center justify-center border-2 border-dashed border-gray-200 rounded-2xl text-gray-300 text-sm h-32">'메모' 탭에서 입력하면 여기에 붙어요! 📌</div>}
-              </div>
-            </div>
           </div>
         </div>
       </div>
       
+      {/* 🔥 [신규] AI 분석 설정 모달 */}
+      {aiModalOpen && (
+        <UI.Modal onClose={() => setAiModalOpen(false)} title="✨ AI 학사일정 분석기" maxWidth="max-w-md">
+          <div className="p-6 space-y-5">
+            <div className="bg-purple-50 p-4 rounded-xl text-purple-700 text-xs leading-relaxed border border-purple-100">
+              <span className="font-bold block mb-1">💡 어떻게 사용하나요?</span>
+              학교 홈페이지에 있는 학사일정 <b>사진이나 PDF</b>를 업로드해 주세요.<br/>
+              AI가 이미지를 읽고 달력에 일정을 자동으로 쏙쏙 넣어줍니다!
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-700 flex items-center gap-1"><Camera size={14}/> 1. 파일 업로드</label>
+              <input type="file" accept="image/*, application/pdf" onChange={e => setAiFile(e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 border border-gray-200 rounded-xl p-2 bg-gray-50 cursor-pointer" />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-gray-700 flex items-center gap-1"><Edit2 size={14}/> 2. 선생님의 특별 추가 요청사항 (선택)</label>
+              <textarea 
+                placeholder="예: 11월 12일은 수능일이라 전체 휴업일이니까 빨간 날로 빼줘!" 
+                value={aiCustomPrompt} 
+                onChange={e => setAiCustomPrompt(e.target.value)} 
+                className="w-full p-3 bg-white border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-300 text-sm h-24 resize-none custom-scrollbar"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <UI.Btn variant="secondary" className="flex-1" onClick={() => setAiModalOpen(false)}>취소</UI.Btn>
+              <UI.Btn className="flex-1 bg-purple-600 hover:bg-purple-700 text-white" disabled={isAnalyzing || !aiFile} onClick={handleAiAnalysis}>
+                {isAnalyzing ? "분석 중..." : "분석 시작"}
+              </UI.Btn>
+            </div>
+          </div>
+        </UI.Modal>
+      )}
+
       {showDDayModal && (
         <UI.Modal onClose={() => setShowDDayModal(false)} title="D-Day 등록" maxWidth="max-w-sm">
           <div className="p-6 space-y-4">
